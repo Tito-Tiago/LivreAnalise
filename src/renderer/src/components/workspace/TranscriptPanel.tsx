@@ -21,6 +21,12 @@ import {
 import { acharOcorrencias } from '@shared/busca'
 import { applyCodingAdjustments } from '@shared/editAdjust'
 import { contrastText, formatCount } from '@/lib/utils'
+import {
+  captureTranscriptViewport,
+  remapTranscriptViewport,
+  restoreTranscriptViewport,
+  type TranscriptViewport
+} from '@/lib/transcriptViewport'
 import { Button } from '@/components/ui/button'
 import { CodingPopover } from './CodingPopover'
 import type { CodeWithCount } from '@shared/types'
@@ -133,7 +139,9 @@ export function TranscriptPanel(): JSX.Element {
   const textRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const backdropRef = useRef<HTMLDivElement>(null)
+  const viewportRef = useRef<TranscriptViewport | null>(null)
   const [pending, setPending] = useState<PendingSelection | null>(null)
+  const selectionGestureRef = useRef(false)
   const [bars, setBars] = useState<Bar[]>([])
   const [columnCount, setColumnCount] = useState(1)
   const columnFloorRef = useRef(1)
@@ -299,6 +307,33 @@ export function TranscriptPanel(): JSX.Element {
   }, [codes])
 
   const text = currentDocument?.plainText ?? ''
+
+  // Copia do texto original: o DOM também contém números de linha e alças,
+  // além de dividir o trecho em spans para os realces.
+  useEffect(() => {
+    const onCopy = (e: ClipboardEvent): void => {
+      const target = document.activeElement
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) return
+      const selection = window.getSelection()
+      if (!selection || selection.isCollapsed || selection.rangeCount === 0) return
+      const range = selection.getRangeAt(0)
+      if (
+        !textRef.current?.contains(range.startContainer) ||
+        !textRef.current.contains(range.endContainer)
+      ) return
+      const start = resolveOffset(range.startContainer, range.startOffset)
+      const end = resolveOffset(range.endContainer, range.endOffset)
+      if (start == null || end == null || !e.clipboardData) return
+      e.preventDefault()
+      e.clipboardData.setData('text/plain', text.slice(start, end))
+    }
+    document.addEventListener('copy', onCopy)
+    return () => document.removeEventListener('copy', onCopy)
+  }, [text])
 
   // Âncoras de notas de trecho: sublinhado pontilhado discreto, sem ocupar
   // a margem direita (que pertence às etiquetas dos códigos).
@@ -507,6 +542,7 @@ export function TranscriptPanel(): JSX.Element {
   useLayoutEffect(() => {
     columnFloorRef.current = 1
     setColumnCount(1)
+    viewportRef.current = null
   }, [currentDocument?.id])
 
   const measure = useCallback(() => {
@@ -545,6 +581,23 @@ export function TranscriptPanel(): JSX.Element {
   }, [codings, codeMap, lineRows])
 
   useLayoutEffect(() => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    const container = editing ? backdropRef.current : scrollRef.current
+    const content = editing ? backdropRef.current : textRef.current
+    if (!container || !content) return
+    restoreTranscriptViewport(container, content, viewport)
+    if (editing && textareaRef.current) {
+      const textarea = textareaRef.current
+      textarea.setSelectionRange(viewport.position, viewport.position)
+      textarea.focus({ preventScroll: true })
+      textarea.scrollTop = container.scrollTop
+      syncScroll()
+    }
+    viewportRef.current = null
+  }, [editing])
+
+  useLayoutEffect(() => {
     if (editing) syncScroll()
   }, [editing, draft])
 
@@ -560,7 +613,7 @@ export function TranscriptPanel(): JSX.Element {
     // posicoes medidas ficam obsoletas e as etiquetas descem junto com o erro.
     ro.observe(textEl)
     return () => ro.disconnect()
-  }, [measure, text, zoom, currentDocument?.id])
+  }, [measure, text, zoom, currentDocument?.id, editing])
 
   const handleMouseUp = (): void => {
     if (dragging) return
@@ -575,6 +628,7 @@ export function TranscriptPanel(): JSX.Element {
     const start = Math.min(a, b)
     const end = Math.max(a, b)
     if (end <= start) return
+    selectionGestureRef.current = true
     const rect = range.getBoundingClientRect()
     setPending({ start, end, x: rect.left, y: rect.bottom + 6 })
   }
@@ -624,12 +678,19 @@ export function TranscriptPanel(): JSX.Element {
   }
 
   const startEditing = (): void => {
+    if (scrollRef.current && textRef.current) {
+      viewportRef.current = captureTranscriptViewport(scrollRef.current, textRef.current)
+    }
     setPending(null)
     setDraft(text)
     setEditing(true)
   }
 
   const cancelEditing = (): void => {
+    if (backdropRef.current) {
+      const viewport = captureTranscriptViewport(backdropRef.current, backdropRef.current)
+      viewportRef.current = remapTranscriptViewport(viewport, draft, text)
+    }
     setEditing(false)
     setDraft('')
   }
@@ -639,6 +700,9 @@ export function TranscriptPanel(): JSX.Element {
     setSaving(true)
     try {
       await updateDocumentText(currentDocument.id, draft)
+      if (backdropRef.current) {
+        viewportRef.current = captureTranscriptViewport(backdropRef.current, backdropRef.current)
+      }
       setEditing(false)
       setDraft('')
     } finally {
@@ -770,7 +834,7 @@ export function TranscriptPanel(): JSX.Element {
               {draftSegments.map((seg) => {
                 const segText = draft.slice(seg.start, seg.end)
                 if (seg.codingIds.length === 0) {
-                  return <span key={seg.start}>{segText}</span>
+                  return <span key={seg.start} data-pos={seg.start}>{segText}</span>
                 }
                 const topCoding = codings.find(
                   (c) => c.id === seg.codingIds[seg.codingIds.length - 1]
@@ -788,6 +852,7 @@ export function TranscriptPanel(): JSX.Element {
                 return (
                   <span
                     key={seg.start}
+                    data-pos={seg.start}
                     data-names={names}
                     style={{
                       backgroundColor: `${topColor}${alpha.bg}`,
@@ -806,7 +871,7 @@ export function TranscriptPanel(): JSX.Element {
               onChange={(e) => setDraft(e.target.value)}
               onScroll={syncScroll}
               spellCheck={false}
-              className="absolute inset-0 resize-none overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] bg-transparent p-3 font-mono text-transparent caret-foreground outline-none"
+              className="absolute inset-0 h-full w-full resize-none overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] bg-transparent p-3 font-mono text-transparent caret-foreground outline-none"
               style={{
                 color: 'transparent',
                 fontSize: `calc(0.875rem * ${zoom})`,
@@ -834,6 +899,7 @@ export function TranscriptPanel(): JSX.Element {
           <div className="flex">
           <div
             ref={textRef}
+            onMouseDown={() => { selectionGestureRef.current = false }}
             onMouseUp={handleMouseUp}
             className="transcript min-w-0 flex-1 py-5"
             style={{
@@ -972,6 +1038,7 @@ export function TranscriptPanel(): JSX.Element {
                               }}
                               onClick={(e) => {
                                 e.stopPropagation()
+                                if (selectionGestureRef.current) return
                                 setSelectedCodingId(
                                   seg.codingIds[seg.codingIds.length - 1]
                                 )
@@ -1080,6 +1147,7 @@ export function TranscriptPanel(): JSX.Element {
           y={pending.y}
           onClose={() => setPending(null)}
           onApply={applyCode}
+          selectedText={text.slice(pending.start, pending.end)}
           onAddNote={() => void addNoteForPending()}
           onReattachNote={podeReligar ? () => void reattachPendingNote() : undefined}
         />

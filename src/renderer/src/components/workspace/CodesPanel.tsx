@@ -1025,13 +1025,14 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
           <Plus className="h-4 w-4" /> Novo código
         </Button>
         {selected.size > 0 && (
-          <div className="mt-2 flex items-center gap-2 rounded-md border bg-muted/50 px-2 py-1.5 text-xs">
-            <span className="flex-1">
+          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border bg-muted/50 px-2 py-1.5 text-xs">
+            <span className="flex-1 whitespace-nowrap">
               {selected.size} selecionado{selected.size > 1 ? 's' : ''}
             </span>
             <Button
               size="sm"
               variant="outline"
+              className="shrink-0"
               onClick={() => {
                 setMoveFilter('')
                 setMoveError(null)
@@ -1043,6 +1044,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
             <Button
               size="sm"
               variant="ghost"
+              className="shrink-0"
               onClick={() => {
                 setSelected(new Set())
                 anchorRef.current = null

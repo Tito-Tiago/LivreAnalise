@@ -23,10 +23,13 @@ export function distinctSegmentCodes<T extends { id: number }>(
 export function groupCodeRuns<C extends { id: number; color: string }>(
   segments: Array<{ start: number; end: number; codingIds: number[] }>,
   codingMap: ReadonlyMap<number, { codeId: number }>,
-  codeMap: ReadonlyMap<number, C>
+  codeMap: ReadonlyMap<number, C>,
+  hoverCodingIds: number[] = []
 ): Array<{ start: number; end: number; colors: string[] }> {
   const runs: Array<{ start: number; end: number; key: string; colors: string[] }> = []
   for (const seg of segments) {
+    // O hover usa uma faixa sólida no próprio span, só na citação apontada.
+    if (seg.codingIds.some((id) => hoverCodingIds.includes(id))) continue
     const runCodes = distinctSegmentCodes(seg.codingIds, codingMap, codeMap)
     if (runCodes.length < 2) continue
     const key = runCodes
@@ -38,6 +41,14 @@ export function groupCodeRuns<C extends { id: number; color: string }>(
     else runs.push({ start: seg.start, end: seg.end, key, colors: runCodes.map((code) => code.color) })
   }
   return runs.map(({ start, end, colors }) => ({ start, end, colors }))
+}
+
+/** A etiqueta pode reunir citações; apenas seus trechos recebem a sua cor. */
+export function hoveredSegmentColor(
+  codingIds: number[],
+  hover: { codingIds: number[]; color: string } | null
+): string | undefined {
+  return hover && codingIds.some((id) => hover.codingIds.includes(id)) ? hover.color : undefined
 }
 
 /**
@@ -142,9 +153,11 @@ export function codedSegmentBackground(fill: {
   ehHit: boolean
   ehHitAtual: boolean
   isNoteHover: boolean
+  isCodingHover?: boolean
   base: string
 }): string {
   if (fill.isFlash) return 'rgba(250, 204, 21, 0.35)'
+  if (fill.isCodingHover) return fill.base
   if (fill.isMultiple && fill.ehHit) return `rgba(250, 204, 21, ${fill.ehHitAtual ? '0.45' : '0.2'})`
   if (fill.isNoteHover) return 'rgba(250, 204, 21, 0.18)'
   return fill.base

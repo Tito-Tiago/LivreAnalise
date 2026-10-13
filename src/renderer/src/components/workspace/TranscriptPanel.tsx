@@ -22,7 +22,7 @@ import {
 import { acharOcorrencias } from '@shared/busca'
 import { applyCodingAdjustments } from '@shared/editAdjust'
 import { contrastText, formatCount } from '@/lib/utils'
-import { codedSegmentBackground, distinctSegmentCodes, groupCodeRuns, mergeLineBands, multipleCodeUnderline, noteUnderlineStyle, snapToLine } from '@/lib/codingHighlight'
+import { codedSegmentBackground, distinctSegmentCodes, groupCodeRuns, hoveredSegmentColor, mergeLineBands, multipleCodeUnderline, noteUnderlineStyle, snapToLine } from '@/lib/codingHighlight'
 import {
   captureTranscriptViewport,
   remapTranscriptViewport,
@@ -173,7 +173,7 @@ export function TranscriptPanel(): JSX.Element {
   )
   const laneWidthRef = useRef<number | null>(laneWidth)
   laneWidthRef.current = laneWidth
-  const [hoverCodings, setHoverCodings] = useState<number[]>([])
+  const [hoverCoding, setHoverCoding] = useState<{ codingIds: number[]; color: string } | null>(null)
   const [hoverNoteIds, setHoverNoteIds] = useState<number[]>([])
   const [selectedCodingId, setSelectedCodingId] = useState<number | null>(null)
   // Busca no texto: Ctrl+F abre, Enter/F3 anda, Esc fecha. Os destaques entram
@@ -608,7 +608,7 @@ export function TranscriptPanel(): JSX.Element {
     ): Array<{ key: string; left: number; top: number; width: number; colors: string[] }> => {
       const spanList = Array.from(root.querySelectorAll<HTMLElement>('[data-pos]'))
       const bands: Array<{ key: string; left: number; top: number; width: number; colors: string[] }> = []
-      for (const run of groupCodeRuns(segments, codingMap, codeMap)) {
+      for (const run of groupCodeRuns(segments, codingMap, codeMap, editing ? [] : hoverCoding?.codingIds)) {
         const rects = rangeRects(spanList, run.start, run.end).map((rect) => ({
           left: rect.left - originLeft,
           top: rect.top - originTop,
@@ -710,7 +710,7 @@ export function TranscriptPanel(): JSX.Element {
     // reiniciado por span — o reinício fatiava trechos curtos e escondia as
     // cores do meio, e as cotas proporcionais pareciam fronteiras de código.
     setMultiBands(collectBands(textEl, containerTop - scrollTop, containerLeft - scrollLeft, hitSegments))
-  }, [codings, codeMap, codingMap, codeBandH, draftSegments, editing, hitSegments, lineRows, noteAnchors])
+  }, [codings, codeMap, codingMap, codeBandH, draftSegments, editing, hitSegments, hoverCoding, lineRows, noteAnchors])
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current
@@ -1210,12 +1210,13 @@ export function TranscriptPanel(): JSX.Element {
                           const topCodingObj = codings.find(
                             (c) => c.id === seg.codingIds[seg.codingIds.length - 1]
                           )
-                          const topColor = topCodingObj
+                          const hoverColor = hoveredSegmentColor(seg.codingIds, hoverCoding)
+                          const topColor = hoverColor ?? (topCodingObj
                             ? codeMap.get(topCodingObj.codeId)?.color ?? '#888'
-                            : '#888'
+                            : '#888')
                           const activeCodes = distinctSegmentCodes(seg.codingIds, codingMap, codeMap)
                           const isMultiple = activeCodes.length > 1
-                           const isHover = seg.codingIds.some((id) => hoverCodings.includes(id))
+                          const isHover = hoverColor != null
                           const isSelected = seg.codingIds.includes(selectedCodingId ?? -1)
                           const hasNote = seg.noteIds.length > 0
                           const isNoteHover =
@@ -1260,15 +1261,16 @@ export function TranscriptPanel(): JSX.Element {
                                   ehHit,
                                   ehHitAtual,
                                   isNoteHover,
+                                  isCodingHover: isHover,
                                   base: `${topColor}${isHover || isSelected ? alpha.bgHover : alpha.bg}`
                                 }),
                                 // o flood da busca vai DEPOIS da barra do código
                                 // na lista: sombra anterior desenha por cima, e a
                                 // barra precisa continuar visível no trecho achado
-                                boxShadow: isMultiple
+                                boxShadow: isMultiple && !isHover
                                   ? (isSelected ? `0 0 0 1px ${topColor}66` : undefined)
                                   : `inset 0 -2px 0 0 ${topColor}${alpha.bar}${isSelected ? `, 0 0 0 1px ${topColor}66` : ''}${
-                                  ehHit
+                                  ehHit && !isMultiple
                                     ? `, inset 0 0 0 999px rgba(250, 204, 21, ${ehHitAtual ? '0.45' : '0.2'})`
                                     : ''
                                 }`,
@@ -1349,8 +1351,8 @@ export function TranscriptPanel(): JSX.Element {
             {bars.map((bar) => (
               <div
                 key={bar.codingId}
-                 onMouseEnter={() => setHoverCodings(bar.codingIds)}
-                 onMouseLeave={() => setHoverCodings([])}
+                 onMouseEnter={() => setHoverCoding({ codingIds: bar.codingIds, color: bar.color })}
+                 onMouseLeave={() => setHoverCoding(null)}
                  onClick={(e) => {
                    e.stopPropagation()
                    // A guarda de seleção pertence ao gesto no texto: sem isto,

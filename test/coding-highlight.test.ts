@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { codedSegmentBackground, distinctSegmentCodes, groupCodeRuns, mergeLineBands, multipleCodeUnderline, noteUnderlineStyle, snapToLine } from '../src/renderer/src/lib/codingHighlight'
+import { codedSegmentBackground, distinctSegmentCodes, groupCodeRuns, hoveredSegmentColor, mergeLineBands, multipleCodeUnderline, noteUnderlineStyle, snapToLine } from '../src/renderer/src/lib/codingHighlight'
 import { computeSegments, markNoteAnchors, markPendingSelection, markSearchHits } from '../src/shared/segments'
 import type { Coding } from '../src/shared/types'
 
@@ -42,6 +42,23 @@ describe('distinctSegmentCodes', () => {
     for (const segment of segments.filter((segment) => segment.start >= 3 && segment.end <= 6)) {
       expect(distinctSegmentCodes(segment.codingIds, codingMap, codes)).toHaveLength(2)
     }
+  })
+})
+
+describe('hoveredSegmentColor', () => {
+  it('uses the label color over other codes throughout its excerpt', () => {
+    const hover = { codingIds: [10], color: '#ff0000' }
+    const segments = computeSegments(10, codings)
+    for (const segment of segments) {
+      expect(hoveredSegmentColor(segment.codingIds, hover))
+        .toBe(segment.start < 6 ? '#ff0000' : undefined)
+    }
+  })
+
+  it('supports grouped labels and restores the original appearance on leave', () => {
+    expect(hoveredSegmentColor([20], { codingIds: [10, 20], color: '#ff0000' })).toBe('#ff0000')
+    expect(hoveredSegmentColor([10, 20], null)).toBeUndefined()
+    expect(hoveredSegmentColor([30], { codingIds: [10], color: '#ff0000' })).toBeUndefined()
   })
 })
 
@@ -106,6 +123,10 @@ describe('codedSegmentBackground', () => {
   it('keeps the code color without highlights', () => {
     expect(codedSegmentBackground(base)).toBe('#ff000040')
   })
+  it('keeps the hovered code color over search and note highlights', () => {
+    expect(codedSegmentBackground({ ...base, isCodingHover: true, isMultiple: true, ehHit: true, isNoteHover: true }))
+      .toBe('#ff000040')
+  })
   it('prioritizes the flash over everything', () => {
     expect(codedSegmentBackground({ ...base, isFlash: true, isMultiple: true, ehHit: true, isNoteHover: true }))
       .toBe('rgba(250, 204, 21, 0.35)')
@@ -123,6 +144,19 @@ describe('codedSegmentBackground', () => {
   })
 })
 describe('groupCodeRuns', () => {
+  it('removes multicolor bands only over hovered excerpts and restores them on leave', () => {
+    const segments = [
+      { start: 0, end: 2, codingIds: [10, 20] },
+      { start: 2, end: 4, codingIds: [30, 20] },
+      { start: 4, end: 6, codingIds: [10, 20] }
+    ]
+    expect(groupCodeRuns(segments, codingMap, codes, [10])).toEqual([
+      { start: 2, end: 4, colors: ['#ff0000', '#0000ff'] }
+    ])
+    expect(groupCodeRuns(segments, codingMap, codes, [])).toEqual([
+      { start: 0, end: 6, colors: ['#ff0000', '#0000ff'] }
+    ])
+  })
   const localCodingMap = new Map([
     [1, { codeId: 1 }],
     [2, { codeId: 2 }],

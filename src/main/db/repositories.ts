@@ -92,12 +92,18 @@ export function getDocument(id: number): DocumentWithText | null {
   return (row as DocumentWithText) ?? null
 }
 
-export function createDocument(input: {
+interface DocumentInput {
   name: string
   plainText: string
   originalFormat: string
   sourceFilename?: string | null
-}): DocumentRecord {
+}
+
+export function createDocument(input: DocumentInput): DocumentRecord {
+  return createDocuments([input])[0]
+}
+
+function insertDocument(input: DocumentInput): DocumentWithText {
   const db = getDb()
   const guid = uuid()
   const res = db
@@ -112,20 +118,33 @@ export function createDocument(input: {
     })
     .run()
   const created = getDocument(Number(res.lastInsertRowid)) as DocumentWithText
-  touchProject()
-  const snapshot = { ...created }
+  return created
+}
+
+export function createDocuments(inputs: DocumentInput[]): DocumentRecord[] {
+  if (inputs.length === 0) return []
+  const db = getDb()
+  const snapshots = db.transaction(() => {
+    const created = inputs.map(insertDocument)
+    touchProject()
+    return created
+  })
   pushHistory({
-    label: `importar "${created.name}"`,
+    label: snapshots.length === 1 ? `importar "${snapshots[0].name}"` : `importar ${snapshots.length} documentos`,
     undo: () => {
-      getDb().delete(documents).where(eq(documents.id, snapshot.id)).run()
-      touchProject()
+      getDb().transaction((tx) => {
+        for (const doc of snapshots) tx.delete(documents).where(eq(documents.id, doc.id)).run()
+        touchProject()
+      })
     },
     redo: () => {
-      getDb().insert(documents).values(snapshot).onConflictDoNothing().run()
-      touchProject()
+      getDb().transaction((tx) => {
+        for (const doc of snapshots) tx.insert(documents).values(doc).run()
+        touchProject()
+      })
     }
   })
-  return created as DocumentRecord
+  return snapshots
 }
 
 export function renameDocument(id: number, name: string): void {

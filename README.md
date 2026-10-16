@@ -55,6 +55,11 @@ copiado para o `.liva`, então mover ou apagar o arquivo original depois não qu
 projeto. O texto pode ser editado dentro do app, e as codificações existentes acompanham
 a edição em vez de se deslocarem.
 
+A extração de DOCX roda em worker isolado, com limite de memória e prazo de
+30 segundos. Por segurança, são aceitos até 50 MiB de arquivo DOCX, 16 MiB por
+entrada XML e 32 MiB de XML expandido no total; arquivos TXT têm limite de 32 MiB.
+Mídia embutida no DOCX não é expandida para extrair texto puro.
+
 ### Codificação
 
 Selecione um trecho do texto e aplique um código. As áreas codificadas aparecem
@@ -87,6 +92,10 @@ citações).
 
 Interopera com o ATLAS.ti pelo formato aberto REFI-QDA. Abrir um `.qdpx` (pelo "Abrir projeto") cria um
 projeto novo — a importação não mistura dados em um projeto existente.
+Escolha um destino que ainda não exista. A importação é preparada separadamente;
+se falhar, o projeto anterior permanece aberto e nenhum lote parcial é publicado.
+O limite é 128 MiB para o arquivo QDPX, 32 MiB por fonte expandida e 256 MiB
+expandidos no total.
 
 O mapeamento é direto nos dois sentidos:
 

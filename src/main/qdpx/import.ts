@@ -1,4 +1,4 @@
-import { readFile } from 'fs/promises'
+import { readFile, stat } from 'fs/promises'
 import { v4 as uuid } from 'uuid'
 import type { ImportReport } from '@shared/types'
 import { getDb, type ProjectDb } from '../db'
@@ -12,6 +12,7 @@ import {
 } from '../db/schema'
 import { deserializeQdpx } from './serialize'
 import type { ParsedQdpx } from './model'
+import { MAX_QDPX_BYTES } from './zipReader'
 
 export function importProjectIntoDb(parsed: ParsedQdpx, db: ProjectDb = getDb()): ImportReport {
   return db.$client.transaction(() => importRecords(parsed, db))()
@@ -245,6 +246,7 @@ function importRecords(parsed: ParsedQdpx, db: ProjectDb): ImportReport {
 }
 
 export async function importQdpx(filePath: string, db: ProjectDb = getDb()): Promise<ImportReport> {
+  if ((await stat(filePath)).size > MAX_QDPX_BYTES) throw new Error('QDPX excede o limite de 128 MiB.')
   const buffer = await readFile(filePath)
   const parsed = await deserializeQdpx(buffer)
   return importProjectIntoDb(parsed, db)

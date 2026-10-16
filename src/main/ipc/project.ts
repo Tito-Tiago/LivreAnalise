@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { basename } from 'path'
+import { existsSync } from 'fs'
 import { v4 as uuid } from 'uuid'
 import { IPC } from '@shared/ipc'
 import type {
@@ -66,6 +67,7 @@ export function registerProjectHandlers(): void {
     })
     if (result.canceled || !result.filePath) return null
     const path = result.filePath
+    if (existsSync(path)) throw new Error('Escolha um arquivo novo: criar projeto não substitui projetos existentes.')
     // Reabrir = nova sessão: o histórico do projeto anterior não vale mais.
     const prev = getActivePath()
     openDatabase(path)
@@ -130,7 +132,7 @@ export function registerProjectHandlers(): void {
   })
 }
 
-function openProjectPath(path: string): OpenProjectResult | null {
+async function openProjectPath(path: string): Promise<OpenProjectResult | null> {
   const prev = getActivePath()
   // Antes de abrir (e portanto antes de migrar): so faz copia quando o arquivo
   // esta atrasado. Melhor esforco -- se falhar, a abertura segue, porque
@@ -147,7 +149,7 @@ function openProjectPath(path: string): OpenProjectResult | null {
   pushRecent(getActivePath() as string, meta.name)
   // 1 checkpoint automático por abertura (retenção poda os antigos).
   // Melhor esforço: nunca bloqueia a abertura, mas o erro é registrado.
-  createVersionSnapshot(path, { kind: 'auto', label: null })
+  await createVersionSnapshot(path, { kind: 'auto', label: null })
     .then(() => {
       if (getActivePath() !== path) return
       for (const window of BrowserWindow.getAllWindows()) {

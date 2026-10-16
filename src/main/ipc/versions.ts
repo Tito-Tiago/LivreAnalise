@@ -1,4 +1,4 @@
-import { basename, dirname, join, resolve, sep } from 'path'
+import { basename, dirname, join, sep } from 'path'
 import { dialog, ipcMain } from 'electron'
 import { IPC } from '@shared/ipc'
 import { getActivePath, openDatabase } from '../db'
@@ -16,6 +16,7 @@ import {
 } from '../services/projectVersions'
 import { SAVE_DIALOG_PROPERTIES } from './saveDialog'
 import { withProjectOperation } from '../services/projectOperation'
+import { canonicalDestination, sameProjectFile } from '../services/projectPath'
 
 function requireActivePath(): string {
   const path = getActivePath()
@@ -26,21 +27,21 @@ function requireActivePath(): string {
 export function registerVersionHandlers(): void {
   ipcMain.handle(IPC.versions.list, async () => readManifest(requireActivePath()))
 
-  ipcMain.handle(IPC.versions.create, async (_e, label: string | null) =>
-    createVersionSnapshot(requireActivePath(), { kind: 'manual', label: label ?? null })
+  ipcMain.handle(IPC.versions.create, (_e, label: string | null) =>
+    withProjectOperation(() => createVersionSnapshot(requireActivePath(), { kind: 'manual', label: label ?? null }))
   )
 
-  ipcMain.handle(IPC.versions.prune, async () => pruneVersions(requireActivePath()))
+  ipcMain.handle(IPC.versions.prune, () => withProjectOperation(async () => pruneVersions(requireActivePath())))
 
   // Restaurar sempre como nova cópia: nunca sobrescreve o arquivo aberto.
   // Apagar checkpoint pela interface: a poda automatica so mexe nos
   // automaticos (guarda 10), entao os manuais acumulavam para sempre e cada um
   // e uma copia integral do projeto.
-  ipcMain.handle(IPC.versions.delete, (_e, id: string) => {
+  ipcMain.handle(IPC.versions.delete, (_e, id: string) => withProjectOperation(async () => {
     const activePath = requireActivePath()
     deleteVersion(activePath, id)
     return readManifest(activePath)
-  })
+  }))
 
   ipcMain.handle(IPC.versions.restore, (_e, id: string) => withProjectOperation(async () => {
     const activePath = requireActivePath()
@@ -55,12 +56,12 @@ export function registerVersionHandlers(): void {
     if (result.canceled || !result.filePath) return null
     // O destino nunca pode ser o próprio projeto aberto: a conexão continua
     // em WAL e o checkpoint sobrescreveria a cópia recém-restaurada.
-    const dest = resolve(result.filePath)
-    if (dest === resolve(activePath)) {
+    const dest = canonicalDestination(result.filePath)
+    if (sameProjectFile(result.filePath, activePath)) {
       throw new Error('Escolha outro nome: não é possível restaurar sobre o próprio projeto aberto.')
     }
     // Nem dentro da pasta de versões: destruiria um snapshot vivo.
-    const dirPrefix = resolve(versionsDir(activePath)) + sep
+    const dirPrefix = canonicalDestination(versionsDir(activePath)) + sep
     if (dest.startsWith(dirPrefix)) {
       throw new Error('Escolha outro local: a cópia não pode ficar dentro da pasta de versões.')
     }

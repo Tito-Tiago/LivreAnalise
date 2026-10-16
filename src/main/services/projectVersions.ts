@@ -4,7 +4,7 @@ import Database from 'better-sqlite3'
 import { v4 as uuid } from 'uuid'
 import { APP_VERSION } from '@shared/version'
 import type { ProjectVersion, ProjectVersionKind } from '@shared/projectVersions'
-import { getRaw } from '../db'
+import { getActivePath, getRaw } from '../db'
 import { CURRENT_SCHEMA_VERSION } from '../db/migrations'
 import { sanitizeProjectFileName } from './projectPath'
 import { writeAtomicFile } from './atomicFile'
@@ -132,6 +132,9 @@ export async function createVersionSnapshot(
   projectPath: string,
   opts?: { kind?: ProjectVersionKind; label?: string | null }
 ): Promise<ProjectVersion> {
+  if (getActivePath() !== projectPath) throw new Error('O projeto mudou antes de criar a versão.')
+  const raw = getRaw()
+  const projectName = currentProjectName()
   const kind = opts?.kind ?? 'manual'
   const label = opts?.label ?? null
   const dir = versionsDir(projectPath)
@@ -143,7 +146,7 @@ export async function createVersionSnapshot(
   // O tmp fica no MESMO diretório: rename(2) entre filesystems lança EXDEV.
   const tmp = join(dir, `.tmp-${uuid()}.liva`)
   try {
-    await getRaw().backup(tmp)
+    await raw.backup(tmp)
     renameSync(tmp, dest)
   } catch (err) {
     rmSync(tmp, { force: true })
@@ -157,7 +160,7 @@ export async function createVersionSnapshot(
     label,
     appVersion: APP_VERSION,
     schemaVersion: CURRENT_SCHEMA_VERSION,
-    projectName: currentProjectName(),
+    projectName,
     sizeBytes: statSync(dest).size
   }
   const entries = [...readManifest(projectPath), entry]

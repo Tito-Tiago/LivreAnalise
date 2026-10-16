@@ -214,6 +214,8 @@ export function TranscribeView({ onBack }: Props): JSX.Element {
         </div>
       </div>
 
+      {models.length === 0 && <p role="status" className="text-sm text-muted-foreground">Verificando os modelos locais…</p>}
+
       {env && !env.ffmpeg && (
         <p className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
           O ffmpeg embutido não foi localizado e não existe ffmpeg no sistema. Sem ele
@@ -392,7 +394,7 @@ export function TranscribeView({ onBack }: Props): JSX.Element {
       )}
 
       {!busy && stage.kind !== 'confirm' && (
-        <Button onClick={start} disabled={!mediaPath || !env?.ffmpeg || !env?.binaryPath || checkedBinaryPath !== binaryPath}>
+        <Button onClick={start} disabled={!mediaPath || !selectedModel || !env?.ffmpeg || !env?.binaryPath || checkedBinaryPath !== binaryPath}>
           <AudioLines className="h-4 w-4" /> Transcrever
         </Button>
       )}

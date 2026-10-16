@@ -4,8 +4,9 @@ import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { app } from 'electron'
 import JSZip from 'jszip'
-import { downloadModel, type DownloadProgress } from './whisperModels'
+import { downloadModel, WHISPER_MODELS, type DownloadProgress } from './whisperModels'
 import { runProcess } from './process'
+import { hashFile } from './download'
 
 // Releases do whisper.cpp trazem binario pronto para Linux e Windows. Para
 // macOS nao existe asset de CLI publicado: nesses casos o usuario informa o
@@ -153,7 +154,24 @@ export function modelPath(file: string): string {
   return join(modelsDir(), file)
 }
 
-export function modelIsReady(file: string): boolean {
+const verifiedModels = new Map<string, { size: number; modified: number; sha256: string }>()
+
+export async function modelIsReady(file: string, signal?: AbortSignal): Promise<boolean> {
   const path = modelPath(file)
-  return existsSync(path) && statSync(path).size > 0
+  const expected = WHISPER_MODELS.find((model) => model.file === file)?.sha256
+  if (!expected || !existsSync(path)) return false
+  try {
+    const info = statSync(path)
+    if (!info.isFile() || info.size === 0) return false
+    const cached = verifiedModels.get(path)
+    if (cached && cached.size === info.size && cached.modified === info.mtimeMs) return cached.sha256 === expected
+    const sha256 = await hashFile(path, signal)
+    const after = statSync(path)
+    if (after.size !== info.size || after.mtimeMs !== info.mtimeMs) return false
+    verifiedModels.set(path, { size: info.size, modified: info.mtimeMs, sha256 })
+    return sha256 === expected
+  } catch {
+    signal?.throwIfAborted()
+    return false
+  }
 }

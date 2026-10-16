@@ -49,9 +49,9 @@ export async function fetchRemoteInfo(url: string, signal?: AbortSignal): Promis
   }
 }
 
-async function hashFile(path: string): Promise<string> {
+export async function hashFile(path: string, signal?: AbortSignal): Promise<string> {
   const hash = createHash('sha256')
-  await pipeline(createReadStream(path), hash)
+  await pipeline(createReadStream(path), hash, { signal })
   return hash.digest('hex')
 }
 
@@ -97,7 +97,7 @@ export async function downloadFile(
       await discard()
       throw new Error('Download incompleto. Tente novamente.')
     }
-    if (expectedSha && await hashFile(partial) !== expectedSha) {
+    if (expectedSha && await hashFile(partial, signal) !== expectedSha) {
       await discard()
       throw new Error('Arquivo baixado está corrompido (sha256 não confere). Tente novamente.')
     }

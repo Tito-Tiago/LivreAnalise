@@ -67,7 +67,7 @@ export class TranscriptionRun {
         )
       }
       const model = modelById(options.modelId)
-      if (!modelIsReady(model.file)) {
+      if (!(await modelIsReady(model.file, signal))) {
         throw new Error(`O modelo ${model.label} ainda não foi baixado`)
       }
       const binary = resolveWhisperBinary(options.binaryPath)

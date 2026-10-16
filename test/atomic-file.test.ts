@@ -1,11 +1,20 @@
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { writeAtomicFile, writeUniqueTextFile } from '../src/main/services/atomicFile'
 
+const state = vi.hoisted(() => ({ unsupported: false }))
+vi.mock('fs', async (original) => {
+  const fs = await original<typeof import('fs')>()
+  return { ...fs, linkSync: (...args: Parameters<typeof fs.linkSync>) => {
+    if (state.unsupported) throw Object.assign(new Error('unsupported'), { code: 'ENOTSUP' })
+    return fs.linkSync(...args)
+  } }
+})
+
 let dir: string
-beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'liva-atomic-')) })
+beforeEach(() => { state.unsupported = false; dir = mkdtempSync(join(tmpdir(), 'liva-atomic-')) })
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
 it('never replaces an existing transcript and publishes complete contents', () => {
@@ -26,4 +35,13 @@ it('replaces metadata without leaving temporary files', () => {
   writeAtomicFile(path, 'new')
   expect(readFileSync(path, 'utf8')).toBe('new')
   expect(readdirSync(dir)).toEqual(['manifest.json'])
+})
+
+it('preserves existing files even on filesystems without hard-link support', () => {
+  state.unsupported = true
+  const path = join(dir, 'transcript.txt')
+  writeFileSync(path, 'preservar')
+  const next = writeUniqueTextFile(path, 'novo')
+  expect(readFileSync(path, 'utf8')).toBe('preservar')
+  expect(readFileSync(next, 'utf8')).toBe('novo')
 })

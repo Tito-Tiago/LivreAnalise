@@ -1,6 +1,6 @@
 import { dialog, ipcMain } from 'electron'
 import { basename, dirname, join } from 'path'
-import { existsSync, linkSync, mkdtempSync, rmSync } from 'fs'
+import { existsSync, mkdtempSync, rmSync } from 'fs'
 import { IPC } from '@shared/ipc'
 import type { ExportResult, ImportReport, OpenProjectResult } from '@shared/types'
 import { getActivePath, getDb, hasActiveProject, openDatabase, openDetachedDatabase } from '../db'
@@ -11,6 +11,7 @@ import { exportQdpx } from '../qdpx/export'
 import { importQdpx } from '../qdpx/import'
 import { ensureMeta } from './project'
 import { SAVE_DIALOG_PROPERTIES } from './saveDialog'
+import { publishExclusiveFile } from '../services/atomicFile'
 
 const PROJECT_EXT = 'liva'
 
@@ -64,7 +65,7 @@ export async function importQdpxAsProject(
     }
     // Hard link publica o arquivo completo sem substituir um destino que tenha
     // aparecido durante a importação; o staging está no mesmo filesystem.
-    linkSync(stagedPath, livaPath)
+    publishExclusiveFile(stagedPath, livaPath)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

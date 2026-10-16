@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { linkSync, renameSync, rmSync, writeFileSync } from 'fs'
+import { constants, copyFileSync, linkSync, renameSync, rmSync, writeFileSync } from 'fs'
 import { basename, dirname, join } from 'path'
 
 function withTemporaryFile<T>(path: string, text: string, publish: (tmp: string) => T): T {
@@ -16,6 +16,17 @@ export function writeAtomicFile(path: string, text: string): void {
   withTemporaryFile(path, text, (tmp) => renameSync(tmp, path))
 }
 
+export function publishExclusiveFile(source: string, dest: string): void {
+  try {
+    linkSync(source, dest)
+  } catch (error) {
+    // FAT/exFAT e alguns volumes de rede não têm hard links. Nesses volumes,
+    // a cópia exclusiva mantém a garantia essencial: nunca truncar o destino.
+    if (!['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EXDEV'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error
+    copyFileSync(source, dest, constants.COPYFILE_EXCL)
+  }
+}
+
 // O hard link publica apenas o arquivo completo, sem sobrescrever nada, mesmo
 // se outra operação escolher o mesmo nome entre a verificação e a escrita.
 export function writeUniqueTextFile(path: string, text: string): string {
@@ -23,7 +34,7 @@ export function writeUniqueTextFile(path: string, text: string): string {
     for (let n = 1; ; n++) {
       const candidate = n === 1 ? path : path.replace(/(\.[^./\\]+)?$/, ` (${n})$1`)
       try {
-        linkSync(tmp, candidate)
+        publishExclusiveFile(tmp, candidate)
         return candidate
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error

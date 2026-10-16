@@ -929,8 +929,21 @@ function getCoding(id: number): Coding {
   return db.select().from(codings).where(eq(codings.id, id)).get() as Coding
 }
 
+function validateDocumentRange(documentId: number, start: number, end: number): void {
+  const doc = getDocument(documentId)
+  if (!doc) throw new Error('Documento não encontrado para o trecho.')
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end <= start || end > doc.plainText.length) {
+    throw new Error('O intervalo do trecho é inválido para este documento.')
+  }
+}
+
 export function createCoding(input: CreateCodingInput): Coding {
   const db = getDb()
+  validateDocumentRange(input.documentId, input.startPos, input.endPos)
+  if (!getCode(input.codeId)) throw new Error('Código não encontrado.')
+  if (db.select({ id: codes.id }).from(codes).where(eq(codes.parentId, input.codeId)).get()) {
+    throw new Error('Categorias não recebem citações. Escolha um código dentro da categoria.')
+  }
   const beforeRows = (db.select().from(codings).where(
     and(eq(codings.documentId, input.documentId), eq(codings.codeId, input.codeId))
   ).all() as Array<typeof codings.$inferSelect>)
@@ -1037,6 +1050,8 @@ export function createCoding(input: CreateCodingInput): Coding {
 export function updateCoding(input: UpdateCodingInput): Coding {
   const db = getDb()
   const before = getCoding(input.id)
+  if (!before) throw new Error('Essa citação não existe mais.')
+  validateDocumentRange(before.documentId, input.startPos, input.endPos)
   if (before && before.startPos === input.startPos && before.endPos === input.endPos) {
     return before
   }
@@ -1134,6 +1149,7 @@ function getNote(id: number): Note {
 export function createNote(input: CreateNoteInput): Note {
   const db = getDb()
   const scope = input.scope
+  if (!['project', 'document', 'excerpt'].includes(scope)) throw new Error('Escopo de nota inválido.')
 
   let documentId: number | null = null
   let startPos: number | null = null
@@ -1228,7 +1244,12 @@ export function updateNote(input: UpdateNoteInput): Note {
   // entao uma nota desvinculada por uma edicao de texto nao tinha volta -- so
   // apagar e reescrever. O trecho original guardado na desvinculacao perde o
   // sentido assim que a ancora existe de novo.
-  if (input.startPos !== undefined && input.endPos !== undefined) {
+  // Notas de projeto continuam sem âncora, mesmo se receberem esses campos.
+  if (beforeRow.documentId != null && (input.startPos !== undefined || input.endPos !== undefined)) {
+    if (input.startPos === undefined || input.endPos === undefined) {
+      throw new Error('Religar uma nota exige um documento e um intervalo completo.')
+    }
+    validateDocumentRange(beforeRow.documentId, input.startPos, input.endPos)
     patch.startPos = input.startPos
     patch.endPos = input.endPos
     patch.anchorStatus = 'attached'

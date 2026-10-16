@@ -127,7 +127,7 @@ export function DocumentsPanel(): JSX.Element {
         title="Renomear documento"
         label="Nome"
         initialValue={renaming?.name}
-        onSubmit={(name) => renaming && renameDocument(renaming.id, name)}
+        onSubmit={async (name) => { if (renaming) await renameDocument(renaming.id, name) }}
       />
     </div>
   )

@@ -725,7 +725,6 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
   const submitGroupPrompt = async (name: string): Promise<void> => {
     if (!groupPrompt) return
     const members = [...groupPrompt]
-    setGroupPrompt(null)
     try {
       await createGroupFrom({
         name,
@@ -734,10 +733,12 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
       })
       setSelected(new Set())
       anchorRef.current = null
+      setGroupPrompt(null)
     } catch (err) {
       flashNotice(
         mensagemDeErro(err, 'Não foi possível criar a categoria.')
       )
+      throw err
     }
   }
 

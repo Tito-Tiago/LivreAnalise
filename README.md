@@ -152,8 +152,8 @@ interface.
 ### O detalhe do módulo nativo
 
 O `better-sqlite3` é compilado, e o ABI do Electron é diferente do ABI do Node. Por isso
-`npm test` recompila o módulo para o Node antes de rodar (`pretest`) e devolve para o
-Electron depois (`posttest`).
+`npm test` recompila o módulo para o Node antes de rodar (`pretest`) e o runner
+de testes devolve para o Electron depois, inclusive quando algum teste falha.
 
 Consequência prática: **não rode `npx vitest` direto** — os testes de banco falham com
 erro de ABI. Use `npm test`. Para o modo watch, rode `npm run rebuild:node` antes e

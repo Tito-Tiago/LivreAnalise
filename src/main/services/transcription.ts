@@ -1,5 +1,5 @@
 import { spawn } from 'child_process'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { dirname, join } from 'path'
 import {
@@ -12,6 +12,7 @@ import {
 import { probeDuration, resolveFfmpeg, toWav } from './ffmpeg'
 import { modelById, modelUrl } from './whisperModels'
 import { modelIsReady, modelPath, resolveWhisperBinary } from './whisperBinary'
+import { writeUniqueTextFile } from './atomicFile'
 
 export interface TranscriptionOptions {
   mediaPath: string
@@ -139,8 +140,7 @@ export class TranscriptionRun {
 
       if (this.canceled) return emit({ kind: 'canceled' })
 
-      const outputPath = transcriptPathFor(options.mediaPath)
-      writeFileSync(outputPath, formatTranscript(segments), 'utf-8')
+      const outputPath = writeUniqueTextFile(transcriptPathFor(options.mediaPath), formatTranscript(segments))
       emit({ kind: 'done', outputPath, segments: segments.length })
     } catch (error) {
       if (this.canceled) emit({ kind: 'canceled' })

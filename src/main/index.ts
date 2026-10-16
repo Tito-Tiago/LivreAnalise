@@ -79,7 +79,7 @@ function createWindow(): void {
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      sandbox: true,
       contextIsolation: true,
       nodeIntegration: false
     }
@@ -122,8 +122,12 @@ function createWindow(): void {
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    openExternalLink(details.url)
     return { action: 'deny' }
+  })
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    event.preventDefault()
+    openExternalLink(url)
   })
 
   // Resolve a janela na hora do clique: capturar `mainWindow` fazia o menu
@@ -161,6 +165,15 @@ function createWindow(): void {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+  }
+}
+
+function openExternalLink(url: string): void {
+  try {
+    if (!['https:', 'http:'].includes(new URL(url).protocol)) return
+    void shell.openExternal(url).catch((error) => console.error('Não foi possível abrir o link:', error))
+  } catch {
+    // URLs inválidas e protocolos locais nunca são enviados ao sistema.
   }
 }
 

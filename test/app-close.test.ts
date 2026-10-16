@@ -4,7 +4,7 @@ import { IPC } from '../src/shared/ipc'
 
 const state = vi.hoisted(() => ({
   windows: [] as any[], app: null as any, ipc: null as any,
-  closeDb: vi.fn(), active: false, cancel: vi.fn(), confirm: vi.fn()
+  closeDb: vi.fn(), active: false, cancel: vi.fn(), confirm: vi.fn(), openExternal: vi.fn(async () => {})
 }))
 vi.mock('../resources/icon.png?asset', () => ({ default: '' }))
 vi.mock('../src/main/db', () => ({ closeDatabase: state.closeDb }))
@@ -24,13 +24,14 @@ vi.mock('electron', async () => {
     close = vi.fn()
     show = vi.fn()
     loadFile = vi.fn()
-    constructor() { super(); state.windows.push(this) }
+    options: any
+    constructor(options: any) { super(); this.options = options; state.windows.push(this) }
     static fromWebContents() { return state.windows[0] }
     static getAllWindows() { return state.windows }
   }
   return {
     app, ipcMain, BrowserWindow: Window,
-    Menu: { setApplicationMenu: vi.fn(), buildFromTemplate: vi.fn() }, shell: {},
+    Menu: { setApplicationMenu: vi.fn(), buildFromTemplate: vi.fn() }, shell: { openExternal: state.openExternal },
     dialog: { showMessageBox: state.confirm, showErrorBox: vi.fn() }
   }
 })
@@ -69,4 +70,19 @@ it('waits for process cleanup before closing a window with an active operation',
   state.active = false
   finish()
   await vi.waitFor(() => expect(state.windows[0].close).toHaveBeenCalled())
+})
+
+it('keeps the preload sandboxed and does not navigate to remote content', () => {
+  expect(state.windows[0].options.webPreferences.sandbox).toBe(true)
+  const preventDefault = vi.fn()
+  state.windows[0].webContents.emit('will-navigate', { preventDefault }, 'https://example.org')
+  expect(preventDefault).toHaveBeenCalled()
+  expect(state.openExternal).toHaveBeenCalledWith('https://example.org')
+})
+
+it('does not send local or executable URL schemes to the operating system', () => {
+  const preventDefault = vi.fn()
+  state.windows[0].webContents.emit('will-navigate', { preventDefault }, 'file:///etc/passwd')
+  state.windows[0].webContents.emit('will-navigate', { preventDefault }, 'javascript:alert(1)')
+  expect(state.openExternal).not.toHaveBeenCalled()
 })

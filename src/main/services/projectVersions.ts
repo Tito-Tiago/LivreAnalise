@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from 'fs'
 import { basename, join } from 'path'
 import Database from 'better-sqlite3'
 import { v4 as uuid } from 'uuid'
@@ -7,6 +7,7 @@ import type { ProjectVersion, ProjectVersionKind } from '@shared/projectVersions
 import { getRaw } from '../db'
 import { CURRENT_SCHEMA_VERSION } from '../db/migrations'
 import { sanitizeProjectFileName } from './projectPath'
+import { writeAtomicFile } from './atomicFile'
 
 const MANIFEST = 'manifest.json'
 export const MAX_AUTO_VERSIONS = 10
@@ -93,15 +94,20 @@ export function readManifest(projectPath: string): ProjectVersion[] {
   try {
     const raw = readFileSync(manifestPath(projectPath), 'utf-8')
     const parsed = JSON.parse(raw) as ProjectVersion[]
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
+    if (!Array.isArray(parsed) || parsed.some((entry) =>
+      !entry || typeof entry.id !== 'string' || typeof entry.file !== 'string' ||
+      /[/\\]/.test(entry.file) || !entry.file.endsWith('.liva')
+    )) throw new Error('Formato de manifesto inválido')
+    return parsed
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw new Error('O catálogo de versões está ilegível. As cópias foram preservadas; não será sobrescrito automaticamente.', { cause: error })
   }
 }
 
 function writeManifest(projectPath: string, entries: ProjectVersion[]): void {
   mkdirSync(versionsDir(projectPath), { recursive: true })
-  writeFileSync(manifestPath(projectPath), JSON.stringify(entries, null, 2), 'utf-8')
+  writeAtomicFile(manifestPath(projectPath), JSON.stringify(entries, null, 2))
 }
 
 function currentProjectName(): string {

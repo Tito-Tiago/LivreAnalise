@@ -18,13 +18,15 @@ import {
   FolderInput,
   X,
   UnfoldVertical,
-  FoldVertical
+  FoldVertical,
+  Search
 } from 'lucide-react'
 import { useAppStore } from '@/stores/appStore'
 import {
   buildLibraryTree,
   canReceiveChild,
   collectCollapsibleKeys,
+  filterLibraryTree,
   groupDestinations,
   isNoopMove,
   validateParentChange,
@@ -120,6 +122,14 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
     [codes, collections, collectionMembers]
   )
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [search, setSearch] = useState('')
+  const [searchCollapsed, setSearchCollapsed] = useState<Set<string>>(new Set())
+  const searching = search.trim().length > 0
+  const filteredTree = useMemo(() => filterLibraryTree(tree, search), [tree, search])
+  const activeCollapsed = searching ? searchCollapsed : collapsed
+  const setActiveCollapsed = searching ? setSearchCollapsed : setCollapsed
+  const setCollapsedRef = useRef(setActiveCollapsed)
+  setCollapsedRef.current = setActiveCollapsed
   const [dialogState, setDialogState] = useState<{
     mode: 'create' | 'edit' | 'child'
     code?: CodeWithCount
@@ -172,11 +182,11 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
   codesRef.current = codes
   const selectedRef = useRef(selected)
   selectedRef.current = selected
-  const collapsedRef = useRef(collapsed)
-  collapsedRef.current = collapsed
+  const collapsedRef = useRef(activeCollapsed)
+  collapsedRef.current = activeCollapsed
 
   const toggle = (key: string): void => {
-    setCollapsed((prev) => {
+    setActiveCollapsed((prev) => {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key)
       else next.add(key)
@@ -184,8 +194,8 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
     })
   }
 
-  const expandAll = (): void => setCollapsed(new Set())
-  const collapseAll = (): void => setCollapsed(collectCollapsibleKeys(tree))
+  const expandAll = (): void => setActiveCollapsed(new Set())
+  const collapseAll = (): void => setActiveCollapsed(collectCollapsibleKeys(filteredTree))
 
   const toggleSelect = (id: number): void => {
     anchorRef.current = id
@@ -204,18 +214,18 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
     const walk = (node: CodeNode<CodeWithCount>, path: string): void => {
       ids.push(node.code.id)
       const key = `${path}/${node.code.id}`
-      if (node.children.length > 0 && !collapsed.has(key)) {
+      if (node.children.length > 0 && !activeCollapsed.has(key)) {
         for (const child of node.children) walk(child, key)
       }
     }
-    for (const col of tree.collections) {
+    for (const col of filteredTree.collections) {
       const key = `col-${col.collection.id}`
-      if (collapsed.has(key)) continue
+      if (activeCollapsed.has(key)) continue
       for (const child of col.children) walk(child, key)
     }
-    for (const node of tree.loose) walk(node, 'loose')
+    for (const node of filteredTree.loose) walk(node, 'loose')
     return ids
-  }, [tree, collapsed])
+  }, [filteredTree, activeCollapsed])
 
   const selectRange = (id: number): void => {
     const anchor = anchorRef.current
@@ -283,7 +293,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
     cancelExpandTimer()
     expandKeyRef.current = key
     expandTimer.current = setTimeout(() => {
-      setCollapsed((prev) => {
+      setCollapsedRef.current((prev) => {
         if (!prev.has(key)) return prev
         const next = new Set(prev)
         next.delete(key)
@@ -771,7 +781,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
   ): JSX.Element => {
     const key = `${path}/${node.code.id}`
     const hasChildren = node.children.length > 0
-    const isCollapsed = collapsed.has(key)
+    const isCollapsed = activeCollapsed.has(key)
     const isSelected = selected.has(node.code.id)
     const isDropTarget = dropTarget === node.code.id
     const isDragging = dragIds?.includes(node.code.id) ?? false
@@ -1012,10 +1022,42 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
   }
 
   const isEmpty = tree.collections.length === 0 && tree.loose.length === 0
+  const noResults = filteredTree.collections.length === 0 && filteredTree.loose.length === 0
 
   return (
     <div className="relative flex h-full flex-col">
       <div className="border-b p-2">
+        <div className="relative mb-2">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            aria-label="Pesquisar códigos"
+            placeholder="Pesquisar códigos…"
+            value={search}
+            className="pl-8 pr-8"
+            onChange={(e) => {
+              setSearch(e.target.value)
+              setSearchCollapsed(new Set())
+              setSelected(new Set())
+              anchorRef.current = null
+            }}
+          />
+          {search && (
+            <button
+              type="button"
+              aria-label="Limpar pesquisa"
+              title="Limpar pesquisa"
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm text-muted-foreground hover:text-foreground"
+              onClick={() => {
+                setSearch('')
+                setSearchCollapsed(new Set())
+                setSelected(new Set())
+                anchorRef.current = null
+              }}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
         <Button
           size="sm"
           variant="secondary"
@@ -1084,11 +1126,15 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
                 Nenhum código ainda. Crie códigos ou selecione um trecho do
                 documento.
               </p>
+            ) : noResults ? (
+              <p role="status" className="p-4 text-center text-xs text-muted-foreground">
+                Nenhum código encontrado.
+              </p>
             ) : (
               <ul>
-                {tree.collections.map((node) => {
+                {filteredTree.collections.map((node) => {
                   const key = `col-${node.collection.id}`
-                  const isCollapsed = collapsed.has(key)
+                  const isCollapsed = activeCollapsed.has(key)
                   return (
                     <li key={key}>
                       <div className="group flex items-center gap-1 rounded-md px-1 py-1 text-sm hover:bg-accent/50">
@@ -1163,15 +1209,15 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
                   )
                 })}
 
-                {tree.loose.length > 0 && (
+                {filteredTree.loose.length > 0 && (
                   <li>
-                    {tree.collections.length > 0 && (
+                    {filteredTree.collections.length > 0 && (
                       <p className="px-2 pb-1 pt-3 text-xs uppercase tracking-wide text-muted-foreground/60">
                         Sem coleção
                       </p>
                     )}
                     <ul>
-                      {tree.loose.map((c) => renderCode(c, 0, 'loose', null))}
+                      {filteredTree.loose.map((c) => renderCode(c, 0, 'loose', null))}
                     </ul>
                   </li>
                 )}

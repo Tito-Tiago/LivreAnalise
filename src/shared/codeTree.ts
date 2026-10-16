@@ -1,4 +1,5 @@
 import type { Code, Collection, CollectionMember } from '@shared/types'
+import { casaBusca } from './busca'
 
 // Grupo nao e um campo no banco: e a propriedade derivada de um codigo ter
 // filhos. O atomo -- o unico nivel que recebe citacao -- e o codigo sem filhos.
@@ -190,6 +191,27 @@ export interface CollectionNode<T extends Code = Code> {
 export interface LibraryTree<T extends Code = Code> {
   collections: Array<CollectionNode<T>>
   loose: Array<CodeNode<T>>
+}
+
+// Mantém os ancestrais dos resultados e todos os filhos de um grupo encontrado.
+export function filterLibraryTree<T extends Code>(
+  tree: LibraryTree<T>,
+  query: string
+): LibraryTree<T> {
+  if (!query.trim()) return tree
+  const filterNodes = (nodes: Array<CodeNode<T>>): Array<CodeNode<T>> =>
+    nodes.flatMap((node) => {
+      if (casaBusca(node.code.name, query)) return [node]
+      const children = filterNodes(node.children)
+      return children.length > 0 ? [{ ...node, children }] : []
+    })
+  return {
+    collections: tree.collections.flatMap((node) => {
+      const children = filterNodes(node.children)
+      return children.length > 0 ? [{ ...node, children }] : []
+    }),
+    loose: filterNodes(tree.loose)
+  }
 }
 
 function codeNode<T extends Code>(

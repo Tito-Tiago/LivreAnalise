@@ -37,6 +37,7 @@ import { mensagemDeErro } from '@/lib/erros'
 import { CodeDialog, type CodeDialogValue } from './CodeDialog'
 import type { CodeWithCount } from '@shared/types'
 import { useAsyncAction } from '@/lib/useAsyncAction'
+import { applyTextareaChange } from '@/lib/textareaChange'
 
 interface PendingSelection {
   start: number
@@ -1142,7 +1143,7 @@ export function TranscriptPanel(): JSX.Element {
             <textarea
               ref={textareaRef}
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
+              onChange={(e) => setDraft(applyTextareaChange(draft, e.target.value))}
               aria-label={`Texto de ${currentDocument.name}`}
               onKeyDown={(e) => {
                 if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {

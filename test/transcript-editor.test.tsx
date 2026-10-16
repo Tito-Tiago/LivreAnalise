@@ -30,3 +30,20 @@ it('keeps the edited text and shows an actionable error if saving fails', async 
   expect(input.value).toBe('rascunho preservado')
   expect(useAppStore.getState().textoSujo).toBe(true)
 })
+
+it('does not save browser line-ending normalization as document edits', async () => {
+  const original = 'primeira linha\r\nsim\r\nterceira linha\r\nfim'
+  const save = vi.fn(async () => {})
+  useAppStore.setState({
+    currentDocument: { ...useAppStore.getState().currentDocument!, plainText: original },
+    updateDocumentText: save
+  })
+  const user = userEvent.setup()
+  render(<TranscriptPanel />)
+  await user.click(screen.getByRole('button', { name: 'Editar texto' }))
+  const input = screen.getByRole('textbox', { name: 'Texto de Entrevista' })
+  await user.click(input)
+  await user.keyboard('{Control>}{End}{/Control}!')
+  await user.click(screen.getByRole('button', { name: 'Salvar texto' }))
+  expect(save).toHaveBeenCalledWith(1, original + '!')
+})

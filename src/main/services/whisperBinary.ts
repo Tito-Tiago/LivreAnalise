@@ -17,14 +17,15 @@ import { downloadModel, type DownloadProgress } from './whisperModels'
 interface BinaryAsset {
   url: string
   archive: 'tar.gz' | 'zip'
+  sha256: string
 }
 
 const RELEASE = 'https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.2'
 
 export const BINARY_ASSETS: Record<string, BinaryAsset> = {
-  'linux-x64': { url: `${RELEASE}/whisper-bin-ubuntu-x64.tar.gz`, archive: 'tar.gz' },
-  'linux-arm64': { url: `${RELEASE}/whisper-bin-ubuntu-arm64.tar.gz`, archive: 'tar.gz' },
-  'win32-x64': { url: `${RELEASE}/whisper-bin-x64.zip`, archive: 'zip' }
+  'linux-x64': { url: `${RELEASE}/whisper-bin-ubuntu-x64.tar.gz`, archive: 'tar.gz', sha256: '46811a3ecf584307480a220b9ef5ff81b7b22dc41577cbc274ce3afc61f753b1' },
+  'linux-arm64': { url: `${RELEASE}/whisper-bin-ubuntu-arm64.tar.gz`, archive: 'tar.gz', sha256: '7e26fa6a36d9174d5c0bf033ccbc026c3b5e569e2ee787058241346ef5392719' },
+  'win32-x64': { url: `${RELEASE}/whisper-bin-x64.zip`, archive: 'zip', sha256: '49dcc16de826f20bd53d44f947a1ae49dfa81f86cad67a64d80820cb192d674a' }
 }
 
 // Ordem de preferencia, nao ordem do diretorio: nos releases atuais o `main`
@@ -114,7 +115,7 @@ export async function downloadWhisperBinary(
   }
   const dir = binaryDir()
   const archive = join(dir, `whisper.${asset.archive}`)
-  await downloadModel(asset.url, archive, onProgress, signal)
+  await downloadModel(asset.url, archive, onProgress, signal, asset.sha256)
   await extract(archive, asset.archive, dir)
 
   const executable = findExecutable(dir)

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { BINARY_ASSETS } from '../src/main/services/whisperBinary'
+import { WHISPER_MODELS, modelUrl } from '../src/main/services/whisperModels'
 
 // A `latest` do whisper.cpp ja ficou sem assets publicados (v1.9.4 sai com
 // zero arquivos), e `.../latest/download/<asset>` passou a devolver 404 no
@@ -24,5 +25,13 @@ describe('whisper binary assets', () => {
     expect(BINARY_ASSETS['linux-x64']?.archive).toBe('tar.gz')
     expect(BINARY_ASSETS['linux-arm64']?.archive).toBe('tar.gz')
     expect(BINARY_ASSETS['win32-x64']?.archive).toBe('zip')
+  })
+
+  it('pins every executable and model to a content digest and immutable release', () => {
+    for (const asset of Object.values(BINARY_ASSETS)) expect(asset.sha256).toMatch(/^[0-9a-f]{64}$/)
+    for (const model of WHISPER_MODELS) {
+      expect(model.sha256).toMatch(/^[0-9a-f]{64}$/)
+      expect(modelUrl(model)).toMatch(/\/resolve\/[0-9a-f]{40}\//)
+    }
   })
 })

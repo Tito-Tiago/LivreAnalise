@@ -95,7 +95,8 @@ export function registerTranscriptionHandlers(): void {
         modelUrl(model),
         modelPath(model.file),
         (progress) => broadcast({ kind: 'download', what: 'modelo', ...progress }),
-        currentDownload.signal
+        currentDownload.signal,
+        model.sha256
       )
       return true
     } finally {

@@ -7,6 +7,7 @@ import { CodeQuotationsDialog } from './CodeQuotationsDialog'
 import { UnsavedTextDialog } from './UnsavedTextDialog'
 import { useAppStore } from '@/stores/appStore'
 import type { CodeWithCount } from '@shared/types'
+import { mensagemDeErro } from '@/lib/erros'
 
 export function Workspace(): JSX.Element {
   const [viewCode, setViewCode] = useState<CodeWithCount | null>(null)
@@ -17,7 +18,13 @@ export function Workspace(): JSX.Element {
   useEffect(
     () =>
       window.api.app.onCloseRequested(async () => {
-        if (await podeSairDoTexto()) window.api.app.confirmClose()
+        try {
+          if (!(await podeSairDoTexto())) return
+          await useAppStore.getState().notesFlush?.()
+          window.api.app.confirmClose()
+        } catch (e) {
+          alert(mensagemDeErro(e, 'Não foi possível salvar as notas. A janela permanecerá aberta.'))
+        }
       }),
     [podeSairDoTexto]
   )

@@ -38,12 +38,19 @@ ipcMain.on(IPC.view.fontChanged, (_e, font: string) => {
 // fechar da janela vira pergunta: sem pendência ele segue direto, e um renderer
 // travado nunca deixa a janela impossível de fechar.
 let textoPendente = false
+let notasPendentes = false
+let quitting = false
+ipcMain.on(IPC.app.notesDirty, (_e, dirty: boolean) => {
+  notasPendentes = dirty
+})
 ipcMain.on(IPC.app.textDirty, (_e, dirty: boolean) => {
   textoPendente = dirty
 })
 ipcMain.on(IPC.app.confirmClose, (e) => {
   textoPendente = false
-  BrowserWindow.fromWebContents(e.sender)?.close()
+  notasPendentes = false
+  if (quitting) app.quit()
+  else BrowserWindow.fromWebContents(e.sender)?.close()
 })
 
 const isDev = !app.isPackaged
@@ -81,12 +88,13 @@ function createWindow(): void {
   })
 
   mainWindow.on('close', (e) => {
-    if (!textoPendente) return
+    if (!textoPendente && !notasPendentes) return
     e.preventDefault()
     mainWindow.webContents.send(IPC.app.closeRequested)
   })
   mainWindow.webContents.on('render-process-gone', () => {
     textoPendente = false
+    notasPendentes = false
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -149,5 +157,9 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  quitting = true
+})
+
+app.on('will-quit', () => {
   closeDatabase()
 })

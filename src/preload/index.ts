@@ -124,6 +124,7 @@ const api: Api = {
     }
   },
   app: {
+    setNotesDirty: (dirty) => ipcRenderer.send(IPC.app.notesDirty, dirty),
     setTextDirty: (dirty) => ipcRenderer.send(IPC.app.textDirty, dirty),
     onCloseRequested: (listener) => {
       const handler = (): void => listener()

@@ -88,7 +88,7 @@ interface AppState {
   setLastUsedCode: (id: number) => void
 
   notesPanelOpen: boolean
-  toggleNotesPanel: () => void
+  toggleNotesPanel: () => Promise<void>
   documentNotes: Note[]
   projectNotes: Note[]
   navigateNoteId: number | null
@@ -102,13 +102,15 @@ interface AppState {
   locateSeq: number
   locateOccurrence: (coding: Coding) => Promise<boolean>
   editorNoteId: number | null
-  openNoteEditor: (id: number | null) => void
+  openNoteEditor: (id: number | null) => Promise<void>
   refreshNotes: () => Promise<void>
   createNote: (input: CreateNoteInput) => Promise<Note>
   updateNote: (input: UpdateNoteInput) => Promise<Note>
   deleteNote: (id: number) => Promise<void>
   notesFlush: (() => Promise<void>) | null
   registerNotesFlush: (fn: (() => Promise<void>) | null) => void
+  notasSujo: boolean
+  setNotasSujo: (sujo: boolean) => void
   // Edição de texto do documento ainda não salva (#31). O TranscriptPanel
   // registra como salvar e descartar; quem vai sair do documento pergunta antes
   // pelo podeSairDoTexto, que abre o UnsavedTextDialog.
@@ -233,9 +235,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   createProject: async () => {
+    if (!(await get().podeSairDoTexto())) return
+    await get().notesFlush?.()
     const result = await window.api.project.create()
     if (!result) return
-    await get().notesFlush?.()
     set({
       project: result.meta,
       currentDocument: null,
@@ -253,9 +256,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   // "Abrir projeto" aceita .liva e .qdpx (#41). O .qdpx vira um projeto novo e
   // volta com o relatório da importação.
   openProject: async () => {
+    if (!(await get().podeSairDoTexto())) return
+    await get().notesFlush?.()
     const result = await window.api.project.open()
     if (!result) return
-    await get().notesFlush?.()
     set({
       project: result.meta,
       currentDocument: null,
@@ -275,9 +279,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   openRecent: async (path) => {
+    if (!(await get().podeSairDoTexto())) return
+    await get().notesFlush?.()
     const result = await window.api.project.openPath(path)
     if (!result) return
-    await get().notesFlush?.()
     set({ project: result.meta, currentDocument: null, codings: [], ...resetNotesState() })
     await loadProjectData(set)
     await get().loadRecents()
@@ -569,7 +574,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setLastUsedCode: (id) => set({ lastUsedCodeId: id }),
 
-  toggleNotesPanel: () => set({ notesPanelOpen: !get().notesPanelOpen }),
+  toggleNotesPanel: async () => {
+    if (get().notesPanelOpen) await get().notesFlush?.()
+    set({ notesPanelOpen: !get().notesPanelOpen })
+  },
 
   navigateToNote: (id) => set({ navigateNoteId: id, notesPanelOpen: true }),
 
@@ -590,7 +598,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     return true
   },
 
-  openNoteEditor: (id) => set({ editorNoteId: id, notesPanelOpen: true }),
+  openNoteEditor: async (id) => {
+    if (id !== get().editorNoteId) await get().notesFlush?.()
+    set({ editorNoteId: id, notesPanelOpen: true })
+  },
 
   refreshNotes: async () => {
     const doc = get().currentDocument
@@ -630,6 +641,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   registerNotesFlush: (fn) => set({ notesFlush: fn }),
+  notasSujo: false,
+  setNotasSujo: (sujo) => {
+    if (get().notasSujo === sujo) return
+    set({ notasSujo: sujo })
+    window.api.app.setNotesDirty(sujo)
+  },
 
   textoSujo: false,
   textoAcoes: null,

@@ -127,6 +127,7 @@ export const IPC = {
     fontChanged: 'view:font-changed'
   },
   app: {
+    notesDirty: 'app:notes-dirty',
     textDirty: 'app:text-dirty',
     closeRequested: 'app:close-requested',
     confirmClose: 'app:confirm-close'
@@ -213,6 +214,7 @@ export interface Api {
     onAction: (listener: (action: string) => void) => () => void
   }
   app: {
+    setNotesDirty: (dirty: boolean) => void
     setTextDirty: (dirty: boolean) => void
     onCloseRequested: (listener: () => void) => () => void
     confirmClose: () => void

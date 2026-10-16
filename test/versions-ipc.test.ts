@@ -72,4 +72,17 @@ describe('versions IPC (integration)', () => {
     await vi.waitFor(() => expect(send).toHaveBeenCalledWith(IPC.versions.changed))
     expect(versions.readManifest(projectPath)).toHaveLength(1)
   })
+
+  it('restores committed data from the WAL of a pre-migration snapshot', async () => {
+    db.getRaw().pragma('wal_checkpoint(TRUNCATE)')
+    db.getRaw().pragma('wal_autocheckpoint = 0')
+    repos.createDocument({ name: 'No WAL', plainText: 'preservar', originalFormat: 'txt' })
+    db.getRaw().pragma('user_version = 0')
+    const snapshot = versions.snapshotBeforeMigration(projectPath)!
+    expect(snapshot.kind).toBe('premigracao')
+    const dest = join(dir, 'com-wal.liva')
+    showSaveDialog.mockResolvedValue({ canceled: false, filePath: dest })
+    await handlers.get(IPC.versions.restore)!(null, snapshot.id)
+    expect(repos.listDocuments().map((d) => d.name)).toEqual(['No WAL', 'Original'])
+  })
 })

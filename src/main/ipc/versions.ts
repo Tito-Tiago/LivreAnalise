@@ -1,4 +1,3 @@
-import { copyFileSync } from 'fs'
 import { basename, dirname, join, resolve, sep } from 'path'
 import { dialog, ipcMain } from 'electron'
 import { IPC } from '@shared/ipc'
@@ -8,6 +7,7 @@ import { ensureMeta } from './project'
 import { pushRecent } from '../services/recents'
 import {
   createVersionSnapshot,
+  copyVersionTo,
   deleteVersion,
   pruneVersions,
   readManifest,
@@ -64,7 +64,7 @@ export function registerVersionHandlers(): void {
       throw new Error('Escolha outro local: a cópia não pode ficar dentro da pasta de versões.')
     }
     // Preserva a cópia antes do checkpoint, cuja retenção pode podar a origem.
-    copyFileSync(source, result.filePath)
+    copyVersionTo(source, result.filePath)
     // Checkpoint do estado atual antes de sair dele. O original nunca é
     // modificado pelo restore, então falha aqui só é registrada.
     await createVersionSnapshot(activePath, { kind: 'auto', label: 'antes de restaurar' }).catch((err: unknown) => {

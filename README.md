@@ -178,10 +178,9 @@ porque uma cópia literal sai de sincronia sem ninguém perceber (foi o que
 aconteceu com o `APP_ORIGIN` do QDPX, que carimbou `0.1.0` em todo projeto
 exportado muito depois de a versão ter mudado).
 
-**Todo PR para a `master` incrementa a versão.** Não é etiqueta, é consequência:
-a tag da release vem daí, então um PR que não incrementa faz o merge
-*sobrescrever* os instaladores da release anterior em vez de publicar uma nova.
-A CI recusa o PR que esquecer.
+**Todo PR para a `master` incrementa a versão.** A tag da release vem daí.
+A CI recusa o PR que esquecer, e a publicação também recusa uma tag já existente:
+os instaladores de uma release publicada não são sobrescritos.
 
 Como escolher o incremento:
 

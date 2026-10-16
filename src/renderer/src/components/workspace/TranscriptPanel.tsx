@@ -36,6 +36,7 @@ import { excerptAction } from '@/lib/excerptAction'
 import { mensagemDeErro } from '@/lib/erros'
 import { CodeDialog, type CodeDialogValue } from './CodeDialog'
 import type { CodeWithCount } from '@shared/types'
+import { useAsyncAction } from '@/lib/useAsyncAction'
 
 interface PendingSelection {
   start: number
@@ -145,6 +146,7 @@ export function TranscriptPanel(): JSX.Element {
   const createNote = useAppStore((s) => s.createNote)
   const openNoteEditor = useAppStore((s) => s.openNoteEditor)
   const zoom = useZoomStore((s) => s.zoom)
+  const { error: actionError, run } = useAsyncAction()
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const textRef = useRef<HTMLDivElement>(null)
@@ -873,6 +875,7 @@ export function TranscriptPanel(): JSX.Element {
     }
     setPending(null)
     setDraft(text)
+    setSaveError(null)
     setEditing(true)
   }
 
@@ -951,6 +954,7 @@ export function TranscriptPanel(): JSX.Element {
   useEffect(() => {
     setEditing(false)
     setDraft('')
+    setSaveError(null)
   }, [currentDocument?.id])
 
   if (!currentDocument) {
@@ -966,10 +970,10 @@ export function TranscriptPanel(): JSX.Element {
 
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col">
-      <div className="flex items-center justify-between border-b px-4 py-2">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2">
+        <div className="flex min-w-0 items-center gap-2">
           <FileText className="h-4 w-4 text-muted-foreground" />
-          <span className="font-medium">{currentDocument.name}</span>
+          <span className="truncate font-medium" title={currentDocument.name}>{currentDocument.name}</span>
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs text-muted-foreground">
@@ -1012,7 +1016,7 @@ export function TranscriptPanel(): JSX.Element {
         </div>
       </div>
 
-      {saveError && <p role="alert" className="border-b p-2 text-sm text-destructive">{saveError}</p>}
+      {(saveError || actionError) && <p role="alert" className="border-b p-2 text-sm text-destructive">{saveError || actionError}</p>}
 
       {/* Caixa compacta flutuando no canto, como a busca do Word e do Docs, em
           vez de uma faixa na largura toda empurrando o texto para baixo. A div
@@ -1402,6 +1406,18 @@ export function TranscriptPanel(): JSX.Element {
                             >
                               {showStartHandle && (
                                 <span
+                                  role="slider"
+                                  tabIndex={0}
+                                  aria-label="Início da citação"
+                                  aria-valuemin={0}
+                                  aria-valuemax={selCoding!.endPos - 1}
+                                  aria-valuenow={selCoding!.startPos}
+                                  onKeyDown={(e) => {
+                                    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+                                    e.preventDefault()
+                                    const pos = Math.max(0, Math.min(selCoding!.endPos - 1, selCoding!.startPos + (e.key === 'ArrowRight' ? 1 : -1)))
+                                    void run(() => updateCoding(selCoding!.id, pos, selCoding!.endPos))
+                                  }}
                                   style={{ ...handleStyle, marginRight: 2 }}
                                   onMouseDown={(e) => {
                                     e.preventDefault()
@@ -1413,6 +1429,18 @@ export function TranscriptPanel(): JSX.Element {
                               {segText}
                               {showEndHandle && (
                                 <span
+                                  role="slider"
+                                  tabIndex={0}
+                                  aria-label="Fim da citação"
+                                  aria-valuemin={selCoding!.startPos + 1}
+                                  aria-valuemax={text.length}
+                                  aria-valuenow={selCoding!.endPos}
+                                  onKeyDown={(e) => {
+                                    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+                                    e.preventDefault()
+                                    const pos = Math.max(selCoding!.startPos + 1, Math.min(text.length, selCoding!.endPos + (e.key === 'ArrowRight' ? 1 : -1)))
+                                    void run(() => updateCoding(selCoding!.id, selCoding!.startPos, pos))
+                                  }}
                                   style={{ ...handleStyle, marginLeft: 2 }}
                                   onMouseDown={(e) => {
                                     e.preventDefault()
@@ -1433,6 +1461,25 @@ export function TranscriptPanel(): JSX.Element {
           </div>
 
           <div
+            role="separator"
+            tabIndex={0}
+            aria-label="Largura da faixa de códigos"
+            aria-orientation="vertical"
+            aria-valuemin={minNeededLaneWidth}
+            aria-valuenow={effectiveLaneWidth}
+            onKeyDown={(e) => {
+              if (e.key === 'Home') {
+                e.preventDefault()
+                setLaneWidth(null)
+                localStorage.removeItem(BAR_LANE_KEY)
+                return
+              }
+              if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+              e.preventDefault()
+              const next = clampLaneWidth(effectiveLaneWidth + (e.key === 'ArrowLeft' ? 16 : -16), columnCount, LANE, effectiveLaneWidth)
+              setLaneWidth(next)
+              localStorage.setItem(BAR_LANE_KEY, String(next))
+            }}
             onMouseDown={(e) => {
               if (e.button !== 0) return
               e.preventDefault()
@@ -1451,7 +1498,7 @@ export function TranscriptPanel(): JSX.Element {
               }
             }}
             title="Arraste para redimensionar"
-            className={`w-1.5 shrink-0 cursor-col-resize self-stretch hover:bg-primary/20 ${
+            className={`w-1.5 shrink-0 cursor-col-resize self-stretch hover:bg-primary/20 focus-visible:bg-primary/30 focus-visible:outline-none ${
               laneResizing ? 'bg-primary/30' : ''
             }`}
           />
@@ -1464,14 +1511,6 @@ export function TranscriptPanel(): JSX.Element {
                 key={bar.codingId}
                  onMouseEnter={() => setHoverCoding({ codingIds: bar.codingIds, color: bar.color })}
                  onMouseLeave={() => setHoverCoding(null)}
-                 onClick={(e) => {
-                   e.stopPropagation()
-                   // A guarda de seleção pertence ao gesto no texto: sem isto,
-                   // clicar na etiqueta logo após selecionar um trecho caía no
-                   // retorno antecipado e a etiqueta parecia morta.
-                   selectionGestureRef.current = false
-                   activateExcerpt(bar.codingIds, [], e.clientX, e.clientY + 8)
-                 }}
                  title={bar.codingIds.length > 1 ? 'Clique para escolher um código' : undefined}
                  className="group absolute flex cursor-pointer items-center gap-1 rounded px-1.5 text-xs"
                  style={{
@@ -1484,17 +1523,30 @@ export function TranscriptPanel(): JSX.Element {
                    outline: bar.codingIds.includes(selectedCodingId ?? -1) ? `2px solid ${bar.color}` : undefined,
                   outlineOffset: 2,
                 }}
-              >
-                 <BarName name={bar.name} />
-                 {bar.codingIds.length > 1 && <span className="shrink-0">+{bar.codingIds.length - 1}</span>}
-                 {(bar.codingIds.length === 1 || bar.codingIds.includes(selectedCodingId ?? -1)) && <button
-                  className="ml-auto shrink-0 opacity-0 group-hover:opacity-100"
+               >
+                 <button
+                   type="button"
+                   className="flex h-full min-w-0 flex-1 items-center gap-1 text-left focus-visible:outline focus-visible:outline-2"
+                   aria-label={`Selecionar citação: ${bar.name}`}
+                   onClick={(e) => {
+                     e.stopPropagation()
+                     selectionGestureRef.current = false
+                     const box = e.currentTarget.getBoundingClientRect()
+                     activateExcerpt(bar.codingIds, [], e.detail === 0 ? box.left : e.clientX, e.detail === 0 ? box.bottom : e.clientY + 8)
+                   }}
+                 >
+                  <BarName name={bar.name} />
+                  {bar.codingIds.length > 1 && <span className="shrink-0">+{bar.codingIds.length - 1}</span>}
+                 </button>
+                  {(bar.codingIds.length === 1 || bar.codingIds.includes(selectedCodingId ?? -1)) && <button
+                   className="ml-auto shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                   aria-label={`Remover citação: ${bar.name}`}
                    title={bar.codingIds.length === 1 ? 'Remover citação' : 'Remover citação selecionada'}
                   onClick={(e) => {
                     // sem isto o clique sobe para a etiqueta e marca como
                     // selecionada a citação que acabou de ser removida
                     e.stopPropagation()
-                     removeCoding(bar.codingIds.includes(selectedCodingId ?? -1) ? selectedCodingId! : bar.codingId)
+                      void run(() => removeCoding(bar.codingIds.includes(selectedCodingId ?? -1) ? selectedCodingId! : bar.codingId))
                   }}
                 >
                   <Trash2 className="h-3 w-3" />

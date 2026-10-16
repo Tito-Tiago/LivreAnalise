@@ -565,6 +565,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   updateCoding: async (id, startPos, endPos) => {
     await window.api.codings.update({ id, startPos, endPos })
     await get().refreshCodings()
+    await get().refreshCodes()
     await get().refreshHistory()
   },
 

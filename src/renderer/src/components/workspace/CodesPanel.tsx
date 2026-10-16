@@ -831,6 +831,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
                 role="button"
                 tabIndex={hasChildren ? 0 : -1}
                 aria-label={hasChildren ? 'Expandir ou recolher' : undefined}
+                aria-expanded={hasChildren ? !isCollapsed : undefined}
                 className="flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center text-muted-foreground"
                 onClick={() => {
                   if (hasChildren) toggle(key)
@@ -891,7 +892,8 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
                 <DropdownMenuTrigger asChild>
                   <button
                     data-no-drag
-                    className="opacity-0 group-hover:opacity-100"
+                    aria-label={`Ações de ${node.code.name}`}
+                    className="rounded opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <MoreVertical className="h-4 w-4" />
                   </button>
@@ -1134,6 +1136,8 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
                     <li key={key}>
                       <div className="group flex items-center gap-1 rounded-md px-1 py-1 text-sm hover:bg-accent/50">
                         <button
+                          aria-label={`${isCollapsed ? 'Expandir' : 'Recolher'} ${node.collection.name}`}
+                          aria-expanded={!isCollapsed}
                           className="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground"
                           onClick={() => toggle(key)}
                         >
@@ -1154,7 +1158,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
                         </button>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <button className="opacity-0 group-hover:opacity-100">
+                            <button aria-label={`Ações de ${node.collection.name}`} className="rounded opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring">
                               <MoreVertical className="h-4 w-4" />
                             </button>
                           </DropdownMenuTrigger>

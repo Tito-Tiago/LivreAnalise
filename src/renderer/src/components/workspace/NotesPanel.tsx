@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils'
 import { mensagemDeErro } from '@/lib/erros'
 import { createNoteSaver } from '@/lib/noteAutosave'
 import type { Note } from '@shared/types'
+import { useAsyncAction } from '@/lib/useAsyncAction'
 
 const AUTOSAVE_DELAY = 800
 
@@ -188,7 +189,7 @@ function NoteEditor({ note, onBack }: { note: Note; onBack: () => void }): JSX.E
         <Button size="sm" variant="ghost" onClick={() => void saveRef.current().then(onBack).catch(() => undefined)}>
           <ArrowLeft className="h-4 w-4" /> Voltar
         </Button>
-        <span className="ml-auto text-[11px] text-muted-foreground">
+        <span role="status" className="ml-auto text-[11px] text-muted-foreground">
           {status === 'saving' && 'Salvando…'}
           {status === 'saved' && 'Salvo'}
           {status === 'dirty' && 'Alterações não salvas'}
@@ -235,12 +236,14 @@ function NoteEditor({ note, onBack }: { note: Note; onBack: () => void }): JSX.E
           </Button>
         )}
         <input
+          aria-label="Título da nota"
           value={title}
           onChange={(e) => handleChange(e.target.value, body)}
           placeholder="Título da nota"
           className="mb-2 h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         />
         <textarea
+          aria-label="Conteúdo da nota"
           value={body}
           onChange={(e) => handleChange(title, e.target.value)}
           placeholder="Escreva o memo aqui…"
@@ -261,6 +264,7 @@ export function NotesPanel(): JSX.Element {
   const toggleNotesPanel = useAppStore((s) => s.toggleNotesPanel)
   const createNote = useAppStore((s) => s.createNote)
   const [erroLista, setErroLista] = useState<string | null>(null)
+  const { error: navigationError, run } = useAsyncAction()
 
   const [filter, setFilter] = useState('')
 
@@ -307,7 +311,7 @@ export function NotesPanel(): JSX.Element {
   }
 
   return (
-    <div className="flex h-full w-80 shrink-0 flex-col border-l bg-card">
+    <div className="flex h-full w-80 max-w-[32vw] shrink-0 flex-col border-l bg-card">
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <StickyNote className="h-4 w-4 text-muted-foreground" />
         <span className="font-medium">Notas</span>
@@ -318,12 +322,14 @@ export function NotesPanel(): JSX.Element {
           size="sm"
           variant="ghost"
           className="ml-auto"
-          onClick={toggleNotesPanel}
+          onClick={() => void run(toggleNotesPanel)}
+          aria-label="Fechar painel de notas"
           title="Fechar painel de notas"
         >
           <X className="h-4 w-4" />
         </Button>
       </div>
+      {navigationError && <p role="alert" className="p-2 text-xs text-destructive">{navigationError}</p>}
       {erroLista && (
         <p className="border-b bg-destructive/10 px-3 py-1.5 text-[11px] text-destructive">
           {erroLista}
@@ -336,6 +342,7 @@ export function NotesPanel(): JSX.Element {
         <>
           <div className="border-b p-2">
             <input
+              aria-label="Filtrar notas"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder="Filtrar notas…"
@@ -366,7 +373,7 @@ export function NotesPanel(): JSX.Element {
                       key={n.id}
                       note={n}
                       quote={null}
-                      onOpen={() => openNoteEditor(n.id)}
+                       onOpen={() => void run(() => openNoteEditor(n.id))}
                     />
                   ))}
                   {excerptAttached.map((n) => (
@@ -374,7 +381,7 @@ export function NotesPanel(): JSX.Element {
                       key={n.id}
                       note={n}
                       quote={quoteOf(n)}
-                      onOpen={() => openNoteEditor(n.id)}
+                       onOpen={() => void run(() => openNoteEditor(n.id))}
                     />
                   ))}
                   {docScoped.length === 0 && excerptAttached.length === 0 && (
@@ -401,7 +408,7 @@ export function NotesPanel(): JSX.Element {
                       key={n.id}
                       note={n}
                       quote={quoteOf(n)}
-                      onOpen={() => openNoteEditor(n.id)}
+                       onOpen={() => void run(() => openNoteEditor(n.id))}
                     />
                   ))}
                 </div>
@@ -430,7 +437,7 @@ export function NotesPanel(): JSX.Element {
               </div>
               <div className="space-y-2">
                 {project.map((n) => (
-                  <NoteCard key={n.id} note={n} quote={null} onOpen={() => openNoteEditor(n.id)} />
+                  <NoteCard key={n.id} note={n} quote={null} onOpen={() => void run(() => openNoteEditor(n.id))} />
                 ))}
                 {project.length === 0 && (
                   <p className="text-xs text-muted-foreground">

@@ -133,7 +133,8 @@ const api: Api = {
         ipcRenderer.removeListener(IPC.app.closeRequested, handler)
       }
     },
-    confirmClose: () => ipcRenderer.send(IPC.app.confirmClose)
+    confirmClose: () => ipcRenderer.send(IPC.app.confirmClose),
+    cancelClose: () => ipcRenderer.send(IPC.app.cancelClose)
   }
 }
 

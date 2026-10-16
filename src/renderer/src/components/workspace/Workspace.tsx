@@ -19,10 +19,14 @@ export function Workspace(): JSX.Element {
     () =>
       window.api.app.onCloseRequested(async () => {
         try {
-          if (!(await podeSairDoTexto())) return
+          if (!(await podeSairDoTexto())) {
+            window.api.app.cancelClose()
+            return
+          }
           await useAppStore.getState().notesFlush?.()
           window.api.app.confirmClose()
         } catch (e) {
+          window.api.app.cancelClose()
           alert(mensagemDeErro(e, 'Não foi possível salvar as notas. A janela permanecerá aberta.'))
         }
       }),

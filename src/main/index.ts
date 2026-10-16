@@ -1,9 +1,10 @@
-import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron'
 import { join } from 'path'
 import { closeDatabase } from './db'
 import { registerIpcHandlers } from './ipc'
 import { IPC } from '@shared/ipc'
 import icon from '../../resources/icon.png?asset'
+import { cancelTranscriptionOperations, hasTranscriptionOperation } from './ipc/transcription'
 
 // A saida padrao pode estar com o pipe fechado (AppImage aberto pelo menu,
 // terminal que ja fechou, saida redirecionada). O proprio Electron faz um
@@ -52,6 +53,7 @@ ipcMain.on(IPC.app.confirmClose, (e) => {
   if (quitting) app.quit()
   else BrowserWindow.fromWebContents(e.sender)?.close()
 })
+ipcMain.on(IPC.app.cancelClose, () => { quitting = false })
 
 const isDev = !app.isPackaged
 
@@ -87,10 +89,32 @@ function createWindow(): void {
     mainWindow.show()
   })
 
+  let stoppingOperation = false
   mainWindow.on('close', (e) => {
-    if (!textoPendente && !notasPendentes) return
+    if (textoPendente || notasPendentes) {
+      e.preventDefault()
+      mainWindow.webContents.send(IPC.app.closeRequested)
+      return
+    }
+    if (!hasTranscriptionOperation()) return
     e.preventDefault()
-    mainWindow.webContents.send(IPC.app.closeRequested)
+    if (stoppingOperation) return
+    stoppingOperation = true
+    void (async () => {
+      const answer = await dialog.showMessageBox(mainWindow, {
+        type: 'question', title: 'Operação em andamento',
+        message: 'Cancelar a transcrição ou download antes de sair?',
+        detail: 'O processamento será interrompido. Áudio temporário será removido; downloads parciais poderão ser retomados.',
+        buttons: ['Continuar trabalhando', 'Cancelar operação e sair'], defaultId: 0, cancelId: 0
+      })
+      if (answer.response !== 1) { quitting = false; return }
+      await cancelTranscriptionOperations()
+      if (quitting) app.quit()
+      else mainWindow.close()
+    })().catch((error) => {
+      quitting = false
+      dialog.showErrorBox('Não foi possível sair', String(error))
+    }).finally(() => { stoppingOperation = false })
   })
   mainWindow.webContents.on('render-process-gone', () => {
     textoPendente = false

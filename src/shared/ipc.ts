@@ -130,7 +130,8 @@ export const IPC = {
     notesDirty: 'app:notes-dirty',
     textDirty: 'app:text-dirty',
     closeRequested: 'app:close-requested',
-    confirmClose: 'app:confirm-close'
+    confirmClose: 'app:confirm-close',
+    cancelClose: 'app:cancel-close'
   }
 } as const
 
@@ -218,6 +219,7 @@ export interface Api {
     setTextDirty: (dirty: boolean) => void
     onCloseRequested: (listener: () => void) => () => void
     confirmClose: () => void
+    cancelClose: () => void
   }
   history: {
     state: () => Promise<HistoryState>

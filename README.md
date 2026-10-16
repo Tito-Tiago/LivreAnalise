@@ -118,6 +118,8 @@ progresso mostra a fração de áudio já processada — não uma roda girando.
 
 O resultado é salvo como `<arquivo>_transcricao.txt`, no formato
 `[HH:MM:SS.mmm -> HH:MM:SS.mmm] texto`, para você importar como documento no projeto.
+Se esse nome já existir, é gerado um nome numerado — uma transcrição revisada
+nunca é substituída silenciosamente.
 
 Em **Avançado** dá para escolher o modelo, o idioma e o caminho do executável.
 
@@ -128,8 +130,8 @@ Em **Avançado** dá para escolher o modelo, o idioma e o caminho do executável
 - **O modelo é baixado no primeiro uso.** O padrão é o `medium` quantizado, com
   **514 MB**. O app pergunta antes de baixar, mostrando o tamanho exato informado pelo
   servidor, com barra de progresso própria e retomada se a conexão cair. O download só é
-  aceito se o tamanho final conferir — download truncado é recusado em vez de virar um
-  modelo corrompido que falha muito depois.
+  aceito se o tamanho final e o SHA-256 conferirem. Os modelos usam uma revisão
+  fixada do upstream, e arquivos já armazenados também são verificados antes do uso.
 - **O modelo quantizado não é um downgrade.** O `faster-whisper` com `compute_type="int8"`
   também roda quantizado; o `medium-q5_0` é o equivalente em ggml, com um terço do
   download do modelo completo (514 MB contra 1462 MB).

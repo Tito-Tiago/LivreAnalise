@@ -1,7 +1,7 @@
 import { readFile } from 'fs/promises'
 import { v4 as uuid } from 'uuid'
 import type { ImportReport } from '@shared/types'
-import { getDb } from '../db'
+import { getDb, type ProjectDb } from '../db'
 import {
   collectionMembers,
   collections,
@@ -14,8 +14,11 @@ import { normalizeText } from '../services/textExtract'
 import { deserializeQdpx } from './serialize'
 import type { ParsedQdpx } from './model'
 
-export function importProjectIntoDb(parsed: ParsedQdpx): ImportReport {
-  const db = getDb()
+export function importProjectIntoDb(parsed: ParsedQdpx, db: ProjectDb = getDb()): ImportReport {
+  return db.$client.transaction(() => importRecords(parsed, db))()
+}
+
+function importRecords(parsed: ParsedQdpx, db: ProjectDb): ImportReport {
   const report: ImportReport = {
     codes: 0,
     groups: 0,
@@ -231,8 +234,8 @@ export function importProjectIntoDb(parsed: ParsedQdpx): ImportReport {
   return report
 }
 
-export async function importQdpx(filePath: string): Promise<ImportReport> {
+export async function importQdpx(filePath: string, db: ProjectDb = getDb()): Promise<ImportReport> {
   const buffer = await readFile(filePath)
   const parsed = await deserializeQdpx(buffer)
-  return importProjectIntoDb(parsed)
+  return importProjectIntoDb(parsed, db)
 }

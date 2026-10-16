@@ -15,6 +15,7 @@ import {
   versionsDir
 } from '../services/projectVersions'
 import { SAVE_DIALOG_PROPERTIES } from './saveDialog'
+import { withProjectOperation } from '../services/projectOperation'
 
 function requireActivePath(): string {
   const path = getActivePath()
@@ -41,7 +42,7 @@ export function registerVersionHandlers(): void {
     return readManifest(activePath)
   })
 
-  ipcMain.handle(IPC.versions.restore, async (_e, id: string) => {
+  ipcMain.handle(IPC.versions.restore, (_e, id: string) => withProjectOperation(async () => {
     const activePath = requireActivePath()
     const source = resolveVersionFile(activePath, id)
     if (!source) throw new Error('Versão não encontrada.')
@@ -75,5 +76,5 @@ export function registerVersionHandlers(): void {
     const meta = ensureMeta(basename(result.filePath).replace(/\.liva$/i, ''))
     pushRecent(result.filePath, meta.name)
     return { meta, path: result.filePath }
-  })
+  }))
 }

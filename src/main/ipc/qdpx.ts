@@ -1,8 +1,9 @@
 import { dialog, ipcMain } from 'electron'
-import { basename } from 'path'
+import { basename, dirname, join } from 'path'
+import { existsSync, linkSync, mkdtempSync, rmSync } from 'fs'
 import { IPC } from '@shared/ipc'
 import type { ExportResult, ImportReport, OpenProjectResult } from '@shared/types'
-import { getActivePath, getDb, hasActiveProject, openDatabase } from '../db'
+import { getActivePath, getDb, hasActiveProject, openDatabase, openDetachedDatabase } from '../db'
 import { clearHistoryFor } from '../history/stack'
 import { projectMeta } from '../db/schema'
 import { pushRecent } from '../services/recents'
@@ -47,11 +48,29 @@ export async function importQdpxAsProject(
   })
   if (saveResult.canceled || !saveResult.filePath) return null
   const livaPath = saveResult.filePath
-
+  // Nunca mesclar ou truncar um projeto existente, mesmo se a pessoa confirmar
+  // a substituição no diálogo do sistema. Primeiro construímos uma cópia isolada.
+  if (existsSync(livaPath)) throw new Error('Escolha um arquivo novo: a importação não substitui projetos existentes.')
+  const dir = mkdtempSync(join(dirname(livaPath), '.livreanalise-import-'))
+  const stagedPath = join(dir, 'projeto.liva')
+  let report: ImportReport
+  try {
+    const staged = openDetachedDatabase(stagedPath)
+    try {
+      report = await importQdpx(qdpxPath, staged)
+    } finally {
+      // Fechar incorpora o WAL ao arquivo principal antes de publicá-lo.
+      staged.$client.close()
+    }
+    // Hard link publica o arquivo completo sem substituir um destino que tenha
+    // aparecido durante a importação; o staging está no mesmo filesystem.
+    linkSync(stagedPath, livaPath)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
   const prev = getActivePath()
-  if (prev) clearHistoryFor(prev)
   openDatabase(livaPath)
-  const report = await importQdpx(qdpxPath)
+  if (prev) clearHistoryFor(prev)
   const name = basename(livaPath).replace(/\.liva$/i, '')
   const meta = ensureMeta(name)
   pushRecent(livaPath, meta.name)

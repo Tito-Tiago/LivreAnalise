@@ -229,11 +229,15 @@ export function updateDocumentText(id: number, newText: string): void {
     for (const rid of citacoesPerdidas) {
       tx.delete(codings).where(eq(codings.id, rid)).run()
     }
-    for (const u of [...updates, ...citacoesRelocalizadas]) {
-      tx.update(codings)
-        .set({ startPos: u.startPos, endPos: u.endPos })
-        .where(eq(codings.id, u.id))
-        .run()
+    // Remove as posições antigas antes de publicar as novas: um destino pode
+    // coincidir com a origem de outra citação que também será deslocada.
+    const ajustes = new Map([...updates, ...citacoesRelocalizadas].map((u) => [u.id, u]))
+    for (const id of ajustes.keys()) tx.delete(codings).where(eq(codings.id, id)).run()
+    for (const original of beforeCodings) {
+      const ajuste = ajustes.get(original.id)
+      if (ajuste) {
+        tx.insert(codings).values({ ...original, startPos: ajuste.startPos, endPos: ajuste.endPos }).run()
+      }
     }
     for (const u of [...noteAdjust.updates, ...notasRelocalizadas]) {
       tx.update(notes)

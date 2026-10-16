@@ -906,8 +906,7 @@ export function listCodingsByCode(codeId: number): CodingWithCode[] {
       endPos: codings.endPos,
       createdAt: codings.createdAt,
       codeName: codes.name,
-      codeColor: codes.color,
-      text: sql<string>`substr(${documents.plainText}, ${codings.startPos} + 1, ${codings.endPos} - ${codings.startPos})`
+      codeColor: codes.color
     })
     .from(codings)
     .innerJoin(codes, eq(codings.codeId, codes.id))
@@ -915,7 +914,14 @@ export function listCodingsByCode(codeId: number): CodingWithCode[] {
     .where(eq(codings.codeId, codeId))
     .orderBy(asc(codings.documentId), asc(codings.startPos))
     .all()
-  return rows as CodingWithCode[]
+  // SQLite substr conta code points, mas as posições do editor são UTF-16.
+  // Carrega cada documento uma vez e recorta na mesma unidade do renderer.
+  const texts = db.selectDistinct({ id: documents.id, text: documents.plainText })
+    .from(documents)
+    .innerJoin(codings, eq(codings.documentId, documents.id))
+    .where(eq(codings.codeId, codeId)).all()
+  const byId = new Map(texts.map((d) => [d.id, d.text]))
+  return rows.map((row) => ({ ...row, text: byId.get(row.documentId)!.slice(row.startPos, row.endPos) })) as CodingWithCode[]
 }
 
 function getCoding(id: number): Coding {

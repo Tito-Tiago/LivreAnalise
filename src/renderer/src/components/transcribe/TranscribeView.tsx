@@ -54,6 +54,20 @@ export function TranscribeView({ onBack }: Props): JSX.Element {
   const [stage, setStage] = useState<Stage>({ kind: 'idle' })
   const [segments, setSegments] = useState<TranscriptionSegment[]>([])
   const logRef = useRef<HTMLDivElement>(null)
+  const operation = useRef(0)
+
+  const cancelOperation = async (): Promise<void> => {
+    const request = ++operation.current
+    try {
+      await window.api.transcription.cancel()
+      if (request === operation.current) {
+        setStage({ kind: 'idle' })
+        setSegments([])
+      }
+    } catch (e) {
+      if (request === operation.current) showFailure(e)
+    }
+  }
 
   const refreshEnv = async (): Promise<void> => {
     const request = ++envRequest.current
@@ -169,14 +183,17 @@ export function TranscribeView({ onBack }: Props): JSX.Element {
 
   const confirmDownload = async (): Promise<void> => {
     if (stage.kind !== 'confirm') return
+    const request = ++operation.current
     const selectedId = stage.modelId
     setStage({ kind: 'download', what: 'modelo', received: 0, total: stage.bytes })
     try {
       if (!(await window.api.transcription.downloadModel(selectedId))) return
+      if (request !== operation.current) return
       await refreshEnv()
+      if (request !== operation.current) return
       await runTranscription(selectedId)
     } catch (e) {
-      showFailure(e)
+      if (request === operation.current) showFailure(e)
     }
   }
 
@@ -185,16 +202,20 @@ export function TranscribeView({ onBack }: Props): JSX.Element {
   // era pedido depois, o que parecia um download que não tinha funcionado (#42).
   // Agora o mesmo botão emenda o modelo escolhido, se ele ainda não existir.
   const downloadBinary = async (): Promise<void> => {
+    const request = ++operation.current
     setStage({ kind: 'download', what: 'programa', received: 0, total: 0 })
     try {
       if (!(await window.api.transcription.downloadBinary())) return
+      if (request !== operation.current) return
       if (selectedModel && !selectedModel.ready) {
         if (!(await window.api.transcription.downloadModel(modelId))) return
+        if (request !== operation.current) return
       }
       await refreshEnv()
+      if (request !== operation.current) return
       setStage({ kind: 'idle' })
     } catch (e) {
-      showFailure(e)
+      if (request === operation.current) showFailure(e)
     }
   }
 
@@ -349,7 +370,7 @@ export function TranscribeView({ onBack }: Props): JSX.Element {
           title={`Baixando o ${stage.what}`}
           detail={`${formatBytes(stage.received)} de ${formatBytes(stage.total)}`}
           fraction={stage.total > 0 ? stage.received / stage.total : 0}
-          onCancel={() => window.api.transcription.cancel()}
+          onCancel={() => void cancelOperation()}
         />
       )}
 
@@ -358,7 +379,7 @@ export function TranscribeView({ onBack }: Props): JSX.Element {
           title="Preparando"
           detail={stage.detail ?? 'convertendo o áudio'}
           fraction={null}
-          onCancel={() => window.api.transcription.cancel()}
+          onCancel={() => void cancelOperation()}
         />
       )}
 
@@ -371,7 +392,7 @@ export function TranscribeView({ onBack }: Props): JSX.Element {
               : 'iniciando'
           }
           fraction={stage.progress}
-          onCancel={() => window.api.transcription.cancel()}
+          onCancel={() => void cancelOperation()}
         />
       )}
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { type JSX, useEffect, useMemo, useRef, useState } from 'react'
 import { casaBusca } from '@shared/busca'
 import {
   ChevronDown,
@@ -18,8 +18,7 @@ import {
   FolderInput,
   X,
   UnfoldVertical,
-  FoldVertical,
-  Search
+  FoldVertical
 } from 'lucide-react'
 import { useAppStore } from '@/stores/appStore'
 import {
@@ -57,6 +56,8 @@ import { Input } from '@/components/ui/input'
 import { CodeDialog, type CodeDialogValue } from './CodeDialog'
 import { SimplePromptDialog } from './SimplePromptDialog'
 import { CollectionMembersDialog } from './CollectionMembersDialog'
+import { CategoryCodesDialog } from './CategoryCodesDialog'
+import { SearchButton, SearchField } from './SearchField'
 import { randomColor } from '@/lib/utils'
 import { mensagemDeErro } from '@/lib/erros'
 import type { CodeWithCount, Collection } from '@shared/types'
@@ -117,25 +118,29 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
   const addCollectionMember = useAppStore((s) => s.addCollectionMember)
   const removeCollectionMember = useAppStore((s) => s.removeCollectionMember)
 
-  const tree = useMemo(
+  const fullTree = useMemo(
     () => buildLibraryTree(codes, collections, collectionMembers),
     [codes, collections, collectionMembers]
   )
+  const [buscaAberta, setBuscaAberta] = useState(false)
+  const [termo, setTermo] = useState('')
+  const fecharBusca = (): void => {
+    setBuscaAberta(false)
+    setTermo('')
+  }
+  const tree = useMemo(() => filterLibraryTree(fullTree, termo), [fullTree, termo])
+  const filtrando = termo.trim() !== ''
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const [search, setSearch] = useState('')
-  const [searchCollapsed, setSearchCollapsed] = useState<Set<string>>(new Set())
-  const searching = search.trim().length > 0
-  const filteredTree = useMemo(() => filterLibraryTree(tree, search), [tree, search])
-  const activeCollapsed = searching ? searchCollapsed : collapsed
-  const setActiveCollapsed = searching ? setSearchCollapsed : setCollapsed
-  const setCollapsedRef = useRef(setActiveCollapsed)
-  setCollapsedRef.current = setActiveCollapsed
+  // Durante a busca tudo fica aberto: um código que casa dentro de uma categoria
+  // recolhida ficaria escondido. Ao limpar, o recolhido de antes volta.
+  const recolhido = (key: string): boolean => !filtrando && collapsed.has(key)
   const [dialogState, setDialogState] = useState<{
     mode: 'create' | 'edit' | 'child'
     code?: CodeWithCount
   } | null>(null)
   const [prompt, setPrompt] = useState<
     | { kind: 'renameCollection'; collection: Collection }
+    | { kind: 'renameCategory'; code: CodeWithCount }
     | { kind: 'groupFromCode'; code: CodeWithCount }
     | { kind: 'collectionFromGroup'; code: CodeWithCount }
     | null
@@ -143,6 +148,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
   const [membersCollection, setMembersCollection] = useState<Collection | null>(
     null
   )
+  const [codesCategory, setCodesCategory] = useState<CodeWithCount | null>(null)
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [moveOpen, setMoveOpen] = useState(false)
   const [moveFilter, setMoveFilter] = useState('')
@@ -151,8 +157,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
   const [dropTarget, setDropTarget] = useState<number | null>(null)
   const [dropPos, setDropPos] = useState<DropZone | null>(null)
   const [dropKind, setDropKind] = useState<DropKind | null>(null)
-  const DEFAULT_HINT =
-    'Bordas: reordenar • centro: agrupar • fundo: 1º nível'
+  const DEFAULT_HINT = 'Solte para mover'
   const [dropHint, setDropHint] = useState(DEFAULT_HINT)
   const [rootHover, setRootHover] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
@@ -182,11 +187,11 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
   codesRef.current = codes
   const selectedRef = useRef(selected)
   selectedRef.current = selected
-  const collapsedRef = useRef(activeCollapsed)
-  collapsedRef.current = activeCollapsed
+  const collapsedRef = useRef(collapsed)
+  collapsedRef.current = collapsed
 
   const toggle = (key: string): void => {
-    setActiveCollapsed((prev) => {
+    setCollapsed((prev) => {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key)
       else next.add(key)
@@ -194,8 +199,8 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
     })
   }
 
-  const expandAll = (): void => setActiveCollapsed(new Set())
-  const collapseAll = (): void => setActiveCollapsed(collectCollapsibleKeys(filteredTree))
+  const expandAll = (): void => setCollapsed(new Set())
+  const collapseAll = (): void => setCollapsed(collectCollapsibleKeys(fullTree))
 
   const toggleSelect = (id: number): void => {
     anchorRef.current = id
@@ -214,18 +219,19 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
     const walk = (node: CodeNode<CodeWithCount>, path: string): void => {
       ids.push(node.code.id)
       const key = `${path}/${node.code.id}`
-      if (node.children.length > 0 && !activeCollapsed.has(key)) {
+      if (node.children.length > 0 && !recolhido(key)) {
         for (const child of node.children) walk(child, key)
       }
     }
-    for (const col of filteredTree.collections) {
+    for (const col of tree.collections) {
       const key = `col-${col.collection.id}`
-      if (activeCollapsed.has(key)) continue
+      if (recolhido(key)) continue
       for (const child of col.children) walk(child, key)
     }
-    for (const node of filteredTree.loose) walk(node, 'loose')
+    for (const node of tree.loose) walk(node, 'loose')
     return ids
-  }, [filteredTree, activeCollapsed])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tree, collapsed, filtrando])
 
   const selectRange = (id: number): void => {
     const anchor = anchorRef.current
@@ -247,7 +253,8 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
   }
 
   // Clique simples seleciona e abre; Ctrl/Cmd alterna e Shift faz intervalo,
-  // ambos sem abrir os trechos.
+  // ambos sem abrir os trechos. Categoria não tem trecho próprio: o clique
+  // nela abre a escolha dos códigos que ela reúne.
   const applySelect = (mods: SelectModifiers, code: CodeWithCount): void => {
     if (mods.ctrlKey || mods.metaKey) {
       toggleSelect(code.id)
@@ -259,7 +266,8 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
     }
     anchorRef.current = code.id
     setSelected(new Set([code.id]))
-    onViewCode(code)
+    if (isGroup(code.id)) setCodesCategory(code)
+    else onViewCode(code)
   }
 
   // Aviso curto (destino inválido, por exemplo) some sozinho.
@@ -293,7 +301,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
     cancelExpandTimer()
     expandKeyRef.current = key
     expandTimer.current = setTimeout(() => {
-      setCollapsedRef.current((prev) => {
+      setCollapsed((prev) => {
         if (!prev.has(key)) return prev
         const next = new Set(prev)
         next.delete(key)
@@ -469,7 +477,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
         return `Mover para dentro de “${codeName(hit.id)}”`
       return 'Mover de nível'
     }
-    return `Criar grupo com “${hit !== null && hit !== 'root' ? codeName(hit.id) : ''}”`
+    return `Criar categoria com “${hit !== null && hit !== 'root' ? codeName(hit.id) : ''}”`
   }
 
   const updateDropTarget = (x: number, y: number): void => {
@@ -619,7 +627,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
       }
       if (intent.kind === 'invalid') {
         cleanupDrag()
-        flashNotice('Destino inválido — nada foi movido.')
+        flashNotice('Não dá para mover para cá.')
         return
       }
       if (intent.kind === 'group') {
@@ -691,6 +699,8 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
     if (!prompt) return
     if (prompt.kind === 'renameCollection') {
       await updateCollection({ id: prompt.collection.id, name })
+    } else if (prompt.kind === 'renameCategory') {
+      await updateCode({ id: prompt.code.id, name })
     } else if (prompt.kind === 'groupFromCode') {
       await createGroup({
         name,
@@ -726,7 +736,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
       anchorRef.current = null
     } catch (err) {
       flashNotice(
-        mensagemDeErro(err, 'Não foi possível criar o grupo.')
+        mensagemDeErro(err, 'Não foi possível criar a categoria.')
       )
     }
   }
@@ -781,7 +791,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
   ): JSX.Element => {
     const key = `${path}/${node.code.id}`
     const hasChildren = node.children.length > 0
-    const isCollapsed = activeCollapsed.has(key)
+    const isCollapsed = recolhido(key)
     const isSelected = selected.has(node.code.id)
     const isDropTarget = dropTarget === node.code.id
     const isDragging = dragIds?.includes(node.code.id) ?? false
@@ -800,7 +810,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
               data-code-children={hasChildren ? '1' : '0'}
               className={`group relative flex cursor-grab select-none items-center gap-1 rounded-md py-1 pr-1 text-sm transition-all duration-150 ease-out hover:bg-accent/50 ${isSelected ? 'bg-accent ring-1 ring-inset ring-primary/40' : ''} ${isDragging ? 'scale-[0.98] opacity-50' : ''} ${isGroupTarget ? 'code-drop-group' : ''} ${isNestTarget && !isGroupTarget ? 'code-drop-inside' : ''} ${isInsertBefore ? 'code-insert-before' : ''} ${isInsertAfter ? 'code-insert-after' : ''} ${isSameSpot ? 'code-drop-same' : ''}`}
               style={{ paddingLeft: depth * 14 + 4 }}
-              title="Arrastar: bordas reordenam • centro agrupa • fundo tira do grupo"
+              title="Arraste para mover"
               onPointerDown={(e) => startPointerDrag(e, node.code)}
               onContextMenu={(e) => {
                 // O container da lista tambem tem menu de contexto (fundo
@@ -897,7 +907,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
                       setMoveOpen(true)
                     }}
                   >
-                    <FolderInput className="h-4 w-4" /> Mover para grupo…
+                    <FolderInput className="h-4 w-4" /> Mover para categoria…
                   </DropdownMenuItem>
                   {canReceiveChild(node.code) && (
                     <DropdownMenuItem
@@ -918,7 +928,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
                         })
                       }
                     >
-                      <Layers className="h-4 w-4" /> Criar coleção com este grupo
+                      <Layers className="h-4 w-4" /> Criar grupo com esta categoria
                     </DropdownMenuItem>
                   )}
                   {!hasChildren && node.code.parentId == null && (
@@ -927,14 +937,14 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
                         setPrompt({ kind: 'groupFromCode', code: node.code })
                       }
                     >
-                      <Tags className="h-4 w-4" /> Criar grupo com este código
+                      <Tags className="h-4 w-4" /> Criar categoria com este código
                     </DropdownMenuItem>
                   )}
                   {node.code.parentId != null && (
                     <DropdownMenuItem
                       onClick={() => void doMove([node.code.id], null)}
                     >
-                      <CornerUpLeft className="h-4 w-4" /> Remover do grupo
+                      <CornerUpLeft className="h-4 w-4" /> Remover da categoria
                     </DropdownMenuItem>
                   )}
                   {collectionId != null && (
@@ -943,22 +953,29 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
                         removeFromCollection(collectionId, node.code.id)
                       }
                     >
-                      <FolderMinus className="h-4 w-4" /> Remover da coleção
+                      <FolderMinus className="h-4 w-4" /> Remover do grupo
                     </DropdownMenuItem>
                   )}
+                  {/* Categoria só se renomeia: cor e descrição são do código,
+                      que é o que recebe citação. */}
                   <DropdownMenuItem
                     onClick={() =>
-                      setDialogState({ mode: 'edit', code: node.code })
+                      hasChildren
+                        ? setPrompt({ kind: 'renameCategory', code: node.code })
+                        : setDialogState({ mode: 'edit', code: node.code })
                     }
                   >
-                    <Pencil className="h-4 w-4" /> Editar
+                    <Pencil className="h-4 w-4" />{' '}
+                    {hasChildren ? 'Renomear' : 'Editar'}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className="text-destructive focus:text-destructive"
                     onClick={() => {
                       if (
                         confirm(
-                          `Excluir o código "${node.code.name}"? Os códigos dentro dele e as citações serão removidos.`
+                          hasChildren
+                            ? `Excluir a categoria "${node.code.name}"? Os códigos dentro dela e as citações serão removidos.`
+                            : `Excluir o código "${node.code.name}"? As citações dele serão removidas.`
                         )
                       ) {
                         deleteCode(node.code.id)
@@ -992,7 +1009,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
                   setPrompt({ kind: 'groupFromCode', code: node.code })
                 }
               >
-                <Tags className="h-4 w-4" /> Criar grupo com este código
+                <Tags className="h-4 w-4" /> Criar categoria com este código
               </ContextMenuItem>
             ) : (
               // O motivo vai no proprio item, nao num title: item desabilitado
@@ -1001,12 +1018,12 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
               // e texto que a maioria nao le.
               <ContextMenuItem disabled className="flex-col items-start gap-0.5">
                 <span className="flex items-center gap-2">
-                  <Tags className="h-4 w-4" /> Criar grupo com este código
+                  <Tags className="h-4 w-4" /> Criar categoria com este código
                 </span>
                 <span className="pl-6 text-xs text-muted-foreground">
                   {hasChildren
-                    ? 'Este código já é um grupo.'
-                    : 'Remova o código do grupo atual primeiro.'}
+                    ? 'Este código já é uma categoria.'
+                    : 'Remova o código da categoria atual primeiro.'}
                 </span>
               </ContextMenuItem>
             )}
@@ -1022,50 +1039,35 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
   }
 
   const isEmpty = tree.collections.length === 0 && tree.loose.length === 0
-  const noResults = filteredTree.collections.length === 0 && filteredTree.loose.length === 0
 
   return (
     <div className="relative flex h-full flex-col">
       <div className="border-b p-2">
-        <div className="relative mb-2">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            aria-label="Pesquisar códigos"
-            placeholder="Pesquisar códigos…"
-            value={search}
-            className="pl-8 pr-8"
-            onChange={(e) => {
-              setSearch(e.target.value)
-              setSearchCollapsed(new Set())
-              setSelected(new Set())
-              anchorRef.current = null
-            }}
+        <div className="flex gap-1">
+          <Button
+            size="sm"
+            variant="secondary"
+            className="min-w-0 flex-1"
+            onClick={() => setDialogState({ mode: 'create' })}
+          >
+            <Plus className="h-4 w-4" /> Novo código
+          </Button>
+          <SearchButton
+            active={buscaAberta}
+            title="Buscar código, categoria ou grupo"
+            onClick={() => (buscaAberta ? fecharBusca() : setBuscaAberta(true))}
           />
-          {search && (
-            <button
-              type="button"
-              aria-label="Limpar pesquisa"
-              title="Limpar pesquisa"
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm text-muted-foreground hover:text-foreground"
-              onClick={() => {
-                setSearch('')
-                setSearchCollapsed(new Set())
-                setSelected(new Set())
-                anchorRef.current = null
-              }}
-            >
-              <X className="h-4 w-4" />
-            </button>
-          )}
         </div>
-        <Button
-          size="sm"
-          variant="secondary"
-          className="w-full"
-          onClick={() => setDialogState({ mode: 'create' })}
-        >
-          <Plus className="h-4 w-4" /> Novo código
-        </Button>
+        {buscaAberta && (
+          <div className="mt-2">
+            <SearchField
+              value={termo}
+              onChange={setTermo}
+              onClose={fecharBusca}
+              placeholder="Código, categoria ou grupo"
+            />
+          </div>
+        )}
         {selected.size > 0 && (
           <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border bg-muted/50 px-2 py-1.5 text-xs">
             <span className="flex-1 whitespace-nowrap">
@@ -1074,7 +1076,6 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
             <Button
               size="sm"
               variant="outline"
-              className="shrink-0"
               onClick={() => {
                 setMoveFilter('')
                 setMoveError(null)
@@ -1086,7 +1087,6 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
             <Button
               size="sm"
               variant="ghost"
-              className="shrink-0"
               onClick={() => {
                 setSelected(new Set())
                 anchorRef.current = null
@@ -1095,12 +1095,6 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
               <X className="h-3.5 w-3.5" /> Limpar
             </Button>
           </div>
-        )}
-        {selected.size === 0 && !notice && (
-          <p className="mt-1.5 px-1 text-[11px] leading-tight text-muted-foreground/70">
-            Ctrl+clique soma • Shift+clique intervala • arraste: borda
-            reordena, centro agrupa
-          </p>
         )}
         {notice && (
           <p className="mt-1.5 rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-[11px] text-destructive">
@@ -1121,20 +1115,20 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
               }
             }}
           >
-            {isEmpty ? (
+            {isEmpty && filtrando ? (
+              <p className="p-4 text-center text-xs text-muted-foreground">
+                Nenhum código encontrado.
+              </p>
+            ) : isEmpty ? (
               <p className="p-4 text-center text-xs text-muted-foreground">
                 Nenhum código ainda. Crie códigos ou selecione um trecho do
                 documento.
               </p>
-            ) : noResults ? (
-              <p role="status" className="p-4 text-center text-xs text-muted-foreground">
-                Nenhum código encontrado.
-              </p>
             ) : (
               <ul>
-                {filteredTree.collections.map((node) => {
+                {tree.collections.map((node) => {
                   const key = `col-${node.collection.id}`
-                  const isCollapsed = activeCollapsed.has(key)
+                  const isCollapsed = recolhido(key)
                   return (
                     <li key={key}>
                       <div className="group flex items-center gap-1 rounded-md px-1 py-1 text-sm hover:bg-accent/50">
@@ -1186,7 +1180,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
                               onClick={() => {
                                 if (
                                   confirm(
-                                    `Excluir a coleção "${node.collection.name}"? Os códigos permanecem.`
+                                    `Excluir o grupo "${node.collection.name}"? Os códigos permanecem.`
                                   )
                                 ) {
                                   deleteCollection(node.collection.id)
@@ -1209,15 +1203,15 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
                   )
                 })}
 
-                {filteredTree.loose.length > 0 && (
+                {tree.loose.length > 0 && (
                   <li>
-                    {filteredTree.collections.length > 0 && (
+                    {tree.collections.length > 0 && (
                       <p className="px-2 pb-1 pt-3 text-xs uppercase tracking-wide text-muted-foreground/60">
-                        Sem coleção
+                        Sem grupo
                       </p>
                     )}
                     <ul>
-                      {filteredTree.loose.map((c) => renderCode(c, 0, 'loose', null))}
+                      {tree.loose.map((c) => renderCode(c, 0, 'loose', null))}
                     </ul>
                   </li>
                 )}
@@ -1277,20 +1271,26 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
         onOpenChange={(o) => !o && setPrompt(null)}
         title={
           prompt?.kind === 'renameCollection'
-            ? 'Renomear coleção'
-            : prompt?.kind === 'groupFromCode'
-              ? `Novo grupo com "${prompt.code.name}"`
+            ? 'Renomear grupo'
+            : prompt?.kind === 'renameCategory'
+              ? 'Renomear categoria'
+              : prompt?.kind === 'groupFromCode'
+              ? `Nova categoria com "${prompt.code.name}"`
               : prompt?.kind === 'collectionFromGroup'
-                ? `Nova coleção com "${prompt.code.name}"`
+                ? `Novo grupo com "${prompt.code.name}"`
                 : ''
         }
         label={
-          prompt?.kind === 'groupFromCode'
-            ? 'Nome do grupo'
-            : 'Nome da coleção'
+          prompt?.kind === 'groupFromCode' || prompt?.kind === 'renameCategory'
+            ? 'Nome da categoria'
+            : 'Nome do grupo'
         }
         initialValue={
-          prompt?.kind === 'renameCollection' ? prompt.collection.name : ''
+          prompt?.kind === 'renameCollection'
+            ? prompt.collection.name
+            : prompt?.kind === 'renameCategory'
+              ? prompt.code.name
+              : ''
         }
         onSubmit={handlePrompt}
       />
@@ -1298,8 +1298,8 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
       <SimplePromptDialog
         open={groupPrompt !== null}
         onOpenChange={(o) => !o && setGroupPrompt(null)}
-        title={`Novo grupo com ${groupNames(groupPrompt)}`}
-        label="Nome do grupo"
+        title={`Nova categoria com ${groupNames(groupPrompt)}`}
+        label="Nome da categoria"
         initialValue=""
         onSubmit={submitGroupPrompt}
       />
@@ -1308,11 +1308,11 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              Mover {selected.size > 0 ? `${selected.size} código${selected.size > 1 ? 's' : ''}` : 'códigos'} para grupo…
+              Mover {selected.size > 0 ? `${selected.size} código${selected.size > 1 ? 's' : ''}` : 'códigos'} para categoria…
             </DialogTitle>
           </DialogHeader>
           <Input
-            placeholder="Pesquisar grupo..."
+            placeholder="Pesquisar categoria..."
             value={moveFilter}
             onChange={(e) => setMoveFilter(e.target.value)}
           />
@@ -1331,11 +1331,11 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
               }}
             >
               <CornerUpLeft className="h-4 w-4 text-muted-foreground" />
-              Sem grupo (1º nível)
+              Sem categoria (1º nível)
             </button>
             {filteredDestinations.length === 0 ? (
               <p className="p-4 text-center text-xs text-muted-foreground">
-                Nenhum grupo ainda. Grupos são códigos de 1º nível que já têm
+                Nenhuma categoria ainda. Categorias são códigos de 1º nível que já têm
                 filhos.
               </p>
             ) : (
@@ -1372,6 +1372,11 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
       <CollectionMembersDialog
         collection={membersCollection}
         onOpenChange={(o) => !o && setMembersCollection(null)}
+      />
+
+      <CategoryCodesDialog
+        category={codesCategory}
+        onOpenChange={(o) => !o && setCodesCategory(null)}
       />
     </div>
   )

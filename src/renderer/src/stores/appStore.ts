@@ -444,6 +444,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   undo: async () => {
+    if (!(await get().podeSairDoTexto())) return null
     await get().notesFlush?.()
     const label = await window.api.history.undo()
     await refreshAfterHistory(get, set)
@@ -451,6 +452,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   redo: async () => {
+    if (!(await get().podeSairDoTexto())) return null
     await get().notesFlush?.()
     const label = await window.api.history.redo()
     await refreshAfterHistory(get, set)
@@ -466,6 +468,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   createVersion: async (label) => {
+    if (!(await get().podeSairDoTexto())) return
     await get().notesFlush?.()
     await window.api.versions.create(label)
     await get().refreshVersions()

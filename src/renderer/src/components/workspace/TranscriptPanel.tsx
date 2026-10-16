@@ -204,6 +204,7 @@ export function TranscriptPanel(): JSX.Element {
   useEffect(() => { setExcerptMenu(null) }, [currentDocument?.id, editing, codings, documentNotes])
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [flashNoteId, setFlashNoteId] = useState<number | null>(null)
   // Ocorrência localizada vinda do painel de trechos: pisca como a nota.
   const [flashCodingId, setFlashCodingId] = useState<number | null>(null)
@@ -888,6 +889,7 @@ export function TranscriptPanel(): JSX.Element {
   const saveEditing = async (): Promise<boolean> => {
     if (!currentDocument) return false
     setSaving(true)
+    setSaveError(null)
     try {
       await updateDocumentText(currentDocument.id, draft)
       if (backdropRef.current) {
@@ -896,6 +898,9 @@ export function TranscriptPanel(): JSX.Element {
       setEditing(false)
       setDraft('')
       return true
+    } catch (error) {
+      setSaveError(mensagemDeErro(error, 'Não foi possível salvar o texto. Seu rascunho foi preservado.'))
+      throw error
     } finally {
       setSaving(false)
     }
@@ -960,7 +965,7 @@ export function TranscriptPanel(): JSX.Element {
   }
 
   return (
-    <div className="flex h-full flex-1 flex-col">
+    <div className="flex h-full min-w-0 flex-1 flex-col">
       <div className="flex items-center justify-between border-b px-4 py-2">
         <div className="flex items-center gap-2">
           <FileText className="h-4 w-4 text-muted-foreground" />
@@ -976,7 +981,7 @@ export function TranscriptPanel(): JSX.Element {
               <Button size="sm" variant="ghost" onClick={() => void cancelEditing()} disabled={saving}>
                 <X className="h-4 w-4" /> Cancelar
               </Button>
-              <Button size="sm" onClick={() => void saveEditing()} disabled={saving}>
+              <Button size="sm" onClick={() => void saveEditing().catch(() => undefined)} disabled={saving}>
                 <Save className="h-4 w-4" /> Salvar texto
               </Button>
             </>
@@ -1006,6 +1011,8 @@ export function TranscriptPanel(): JSX.Element {
           )}
         </div>
       </div>
+
+      {saveError && <p role="alert" className="border-b p-2 text-sm text-destructive">{saveError}</p>}
 
       {/* Caixa compacta flutuando no canto, como a busca do Word e do Docs, em
           vez de uma faixa na largura toda empurrando o texto para baixo. A div
@@ -1132,6 +1139,13 @@ export function TranscriptPanel(): JSX.Element {
               ref={textareaRef}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
+              aria-label={`Texto de ${currentDocument.name}`}
+              onKeyDown={(e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+                  e.preventDefault()
+                  if (!saving) void saveEditing().catch(() => undefined)
+                }
+              }}
               onScroll={syncScroll}
               spellCheck={false}
               className="absolute inset-0 h-full w-full resize-none overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] bg-transparent p-3 font-mono text-transparent caret-foreground outline-none"

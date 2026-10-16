@@ -29,6 +29,7 @@ const LANGUAGES = [
 
 type Stage =
   | { kind: 'idle' }
+  | { kind: 'checking' }
   | { kind: 'download'; what: 'modelo' | 'programa'; received: number; total: number }
   | { kind: 'confirm'; modelId: string; bytes: number }
   | { kind: 'preparing'; detail?: string }
@@ -47,23 +48,29 @@ export function TranscribeView({ onBack }: Props): JSX.Element {
   const [modelId, setModelId] = useState('medium-q5_0')
   const [language, setLanguage] = useState('pt')
   const [binaryPath, setBinaryPath] = useState('')
+  const [checkedBinaryPath, setCheckedBinaryPath] = useState<string | null>(null)
+  const envRequest = useRef(0)
   const [advanced, setAdvanced] = useState(false)
   const [stage, setStage] = useState<Stage>({ kind: 'idle' })
   const [segments, setSegments] = useState<TranscriptionSegment[]>([])
   const logRef = useRef<HTMLDivElement>(null)
 
   const refreshEnv = async (): Promise<void> => {
+    const request = ++envRequest.current
     const [nextEnv, nextModels] = await Promise.all([
-      window.api.transcription.env(),
+      window.api.transcription.env(binaryPath || null),
       window.api.transcription.models()
     ])
-    setEnv(nextEnv)
+    if (request === envRequest.current) {
+      setEnv(nextEnv)
+      setCheckedBinaryPath(binaryPath)
+    }
     setModels(nextModels)
     setModelId((current) => current || nextEnv.defaultModelId)
   }
 
   useEffect(() => {
-    refreshEnv()
+    void refreshEnv().catch((e) => setStage({ kind: 'error', message: mensagemDeErro(e) }))
     return window.api.transcription.onEvent((event: TranscriptionEvent) => {
       if (event.kind === 'download') {
         setStage({
@@ -90,12 +97,29 @@ export function TranscribeView({ onBack }: Props): JSX.Element {
   }, [])
 
   useEffect(() => {
+    let live = true
+    const request = ++envRequest.current
+    const timer = setTimeout(() => {
+      void window.api.transcription.env(binaryPath || null).then((next) => {
+        if (live && request === envRequest.current) {
+          setEnv(next)
+          setCheckedBinaryPath(binaryPath)
+        }
+      }).catch((e) => {
+        if (live) setStage({ kind: 'error', message: mensagemDeErro(e) })
+      })
+    }, 250)
+    return () => { live = false; clearTimeout(timer) }
+  }, [binaryPath])
+
+  useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight })
   }, [segments.length])
 
   const selectedModel = models.find((m) => m.id === modelId)
   const busy =
-    stage.kind === 'download' || stage.kind === 'preparing' || stage.kind === 'running'
+    stage.kind === 'checking' || stage.kind === 'download' || stage.kind === 'preparing' || stage.kind === 'running'
+  const locked = busy || stage.kind === 'confirm'
 
   const pickFile = async (): Promise<void> => {
     const path = await window.api.transcription.pickMedia()
@@ -108,8 +132,11 @@ export function TranscribeView({ onBack }: Props): JSX.Element {
 
   // Pergunta antes de baixar, com o tamanho real vindo do servidor.
   const askForModel = async (): Promise<void> => {
-    const bytes = await window.api.transcription.modelSize(modelId)
-    setStage({ kind: 'confirm', modelId, bytes })
+    setStage({ kind: 'checking' })
+    try {
+      const bytes = await window.api.transcription.modelSize(modelId)
+      setStage({ kind: 'confirm', modelId, bytes })
+    } catch (e) { showFailure(e) }
   }
 
   // O Electron prefixa o erro do main com "Error invoking remote method
@@ -119,13 +146,14 @@ export function TranscribeView({ onBack }: Props): JSX.Element {
     setStage({ kind: 'error', message: mensagemDeErro(e) })
   }
 
-  const runTranscription = async (): Promise<void> => {
+  const runTranscription = async (selectedId = modelId): Promise<void> => {
     if (!mediaPath) return
     setSegments([])
+    setStage({ kind: 'preparing', detail: 'iniciando' })
     try {
       await window.api.transcription.start({
         mediaPath,
-        modelId,
+        modelId: selectedId,
         language: language || null,
         binaryPath: binaryPath || null
       })
@@ -140,10 +168,13 @@ export function TranscribeView({ onBack }: Props): JSX.Element {
   }
 
   const confirmDownload = async (): Promise<void> => {
+    if (stage.kind !== 'confirm') return
+    const selectedId = stage.modelId
+    setStage({ kind: 'download', what: 'modelo', received: 0, total: stage.bytes })
     try {
-      await window.api.transcription.downloadModel(modelId)
+      if (!(await window.api.transcription.downloadModel(selectedId))) return
       await refreshEnv()
-      await runTranscription()
+      await runTranscription(selectedId)
     } catch (e) {
       showFailure(e)
     }
@@ -154,10 +185,11 @@ export function TranscribeView({ onBack }: Props): JSX.Element {
   // era pedido depois, o que parecia um download que não tinha funcionado (#42).
   // Agora o mesmo botão emenda o modelo escolhido, se ele ainda não existir.
   const downloadBinary = async (): Promise<void> => {
+    setStage({ kind: 'download', what: 'programa', received: 0, total: 0 })
     try {
-      await window.api.transcription.downloadBinary()
+      if (!(await window.api.transcription.downloadBinary())) return
       if (selectedModel && !selectedModel.ready) {
-        await window.api.transcription.downloadModel(modelId)
+        if (!(await window.api.transcription.downloadModel(modelId))) return
       }
       await refreshEnv()
       setStage({ kind: 'idle' })
@@ -204,7 +236,7 @@ export function TranscribeView({ onBack }: Props): JSX.Element {
             )}
           </p>
           {env.canDownloadBinary ? (
-            <Button size="sm" variant="secondary" onClick={downloadBinary} disabled={busy}>
+            <Button size="sm" variant="secondary" onClick={downloadBinary} disabled={locked}>
               <Download className="h-4 w-4" />{' '}
               {faltaModelo ? 'Baixar tudo' : 'Baixar o programa'}
             </Button>
@@ -219,7 +251,7 @@ export function TranscribeView({ onBack }: Props): JSX.Element {
 
       <div className="rounded-lg border bg-card p-4">
         <div className="flex items-center gap-3">
-          <Button variant="secondary" onClick={pickFile} disabled={busy}>
+          <Button variant="secondary" onClick={() => void pickFile().catch(showFailure)} disabled={locked}>
             <FileAudio className="h-4 w-4" /> Escolher arquivo
           </Button>
           <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
@@ -247,7 +279,7 @@ export function TranscribeView({ onBack }: Props): JSX.Element {
                 className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
                 value={modelId}
                 onChange={(e) => setModelId(e.target.value)}
-                disabled={busy}
+                disabled={locked}
               >
                 {models.map((model) => (
                   <option key={model.id} value={model.id}>
@@ -264,7 +296,7 @@ export function TranscribeView({ onBack }: Props): JSX.Element {
                 className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
                 value={language}
                 onChange={(e) => setLanguage(e.target.value)}
-                disabled={busy}
+                disabled={locked}
               >
                 {LANGUAGES.map((lang) => (
                   <option key={lang.id} value={lang.id}>
@@ -280,12 +312,17 @@ export function TranscribeView({ onBack }: Props): JSX.Element {
                 value={binaryPath}
                 placeholder={env?.binaryPath ?? '/usr/local/bin/whisper-cli'}
                 onChange={(e) => setBinaryPath(e.target.value)}
-                disabled={busy}
+                disabled={locked}
               />
             </label>
+            {binaryPath && checkedBinaryPath === binaryPath && !env?.binaryPath && (
+              <p role="alert" className="text-sm text-destructive">O caminho informado não é um arquivo executável acessível.</p>
+            )}
           </div>
         )}
       </div>
+
+      {stage.kind === 'checking' && <p role="status" className="text-sm text-muted-foreground">Consultando o tamanho do modelo…</p>}
 
       {stage.kind === 'confirm' && (
         <div className="rounded-lg border bg-card p-4">
@@ -355,7 +392,7 @@ export function TranscribeView({ onBack }: Props): JSX.Element {
       )}
 
       {!busy && stage.kind !== 'confirm' && (
-        <Button onClick={start} disabled={!mediaPath || !env?.ffmpeg || !env?.binaryPath}>
+        <Button onClick={start} disabled={!mediaPath || !env?.ffmpeg || !env?.binaryPath || checkedBinaryPath !== binaryPath}>
           <AudioLines className="h-4 w-4" /> Transcrever
         </Button>
       )}

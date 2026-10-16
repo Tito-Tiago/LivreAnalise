@@ -59,7 +59,7 @@ const api: Api = {
     delete: (id) => ipcRenderer.invoke(IPC.notes.delete, id)
   },
   transcription: {
-    env: () => ipcRenderer.invoke(IPC.transcription.env),
+    env: (binaryPath) => ipcRenderer.invoke(IPC.transcription.env, binaryPath),
     models: () => ipcRenderer.invoke(IPC.transcription.models),
     modelSize: (modelId) => ipcRenderer.invoke(IPC.transcription.modelSize, modelId),
     pickMedia: () => ipcRenderer.invoke(IPC.transcription.pickMedia),

@@ -187,12 +187,12 @@ export interface Api {
     delete: (id: number) => Promise<void>
   }
   transcription: {
-    env: () => Promise<TranscriptionEnv>
+    env: (binaryPath?: string | null) => Promise<TranscriptionEnv>
     models: () => Promise<TranscriptionModel[]>
     modelSize: (modelId: string) => Promise<number>
     pickMedia: () => Promise<string | null>
     downloadModel: (modelId: string) => Promise<boolean>
-    downloadBinary: () => Promise<string>
+    downloadBinary: () => Promise<string | null>
     start: (input: TranscriptionStartInput) => Promise<void>
     cancel: () => Promise<void>
     onEvent: (listener: (event: TranscriptionEvent) => void) => () => void

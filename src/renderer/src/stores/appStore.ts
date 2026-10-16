@@ -377,6 +377,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     // com elas: o contador somava notas inexistentes, a lista mostrava notas
     // fantasmas, e o editor podia ficar aberto sobre uma nota que ja nao existe.
     if (editada && editada.documentId === id) {
+      get().setNotasSujo(false)
       set({ editorNoteId: null, navigateNoteId: null })
     }
     await get().refreshDocuments()

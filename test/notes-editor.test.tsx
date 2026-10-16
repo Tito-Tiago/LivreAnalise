@@ -52,3 +52,26 @@ it('keeps a note open with its draft when leaving cannot save it', async () => {
   expect((screen.getByRole('textbox', { name: 'Conteúdo da nota' }) as HTMLTextAreaElement).value).toBe('não perder')
   expect(screen.getByText('disco cheio')).toBeTruthy()
 })
+
+it('clears pending-note state when its document is deleted', async () => {
+  Object.assign(window.api, {
+    documents: { delete: vi.fn(async () => {}), list: async () => [] },
+    notes: { listProject: async () => [] },
+    codes: { list: async () => [] },
+    history: { state: async () => ({}) },
+    project: { close: async () => {}, recents: async () => [] }
+  })
+  useAppStore.setState({
+    projectNotes: [], documentNotes: [{ ...note, scope: 'document', documentId: 1 }],
+    currentDocument: { id: 1, plainText: 'texto' } as any
+  })
+  render(<NotesPanel />)
+  await userEvent.type(screen.getByRole('textbox', { name: 'Conteúdo da nota' }), 'rascunho')
+  expect(useAppStore.getState().notasSujo).toBe(true)
+  await act(async () => { await useAppStore.getState().deleteDocument(1) })
+  expect(useAppStore.getState().notesFlush).toBeNull()
+  expect(useAppStore.getState().notasSujo).toBe(false)
+  expect(window.api.app.setNotesDirty).toHaveBeenLastCalledWith(false)
+  await act(async () => { await useAppStore.getState().closeProject() })
+  expect(useAppStore.getState().notasSujo).toBe(false)
+})

@@ -10,7 +10,6 @@ import {
   documents,
   notes
 } from '../db/schema'
-import { normalizeText } from '../services/textExtract'
 import { deserializeQdpx } from './serialize'
 import type { ParsedQdpx } from './model'
 
@@ -62,7 +61,8 @@ function importRecords(parsed: ParsedQdpx, db: ProjectDb): ImportReport {
         name: code.name,
         color: code.color ?? '#2563eb',
         description: code.description ?? null,
-        parentId
+        parentId,
+        sortOrder: report.codes
       })
       .run()
     codeIdByGuid.set(code.guid, Number(res.lastInsertRowid))
@@ -76,7 +76,8 @@ function importRecords(parsed: ParsedQdpx, db: ProjectDb): ImportReport {
       .values({
         guid: set.guid || uuid(),
         name: set.name,
-        description: set.description ?? null
+        description: set.description ?? null,
+        sortOrder: report.groups
       })
       .run()
     const collectionId = Number(res.lastInsertRowid)
@@ -94,7 +95,9 @@ function importRecords(parsed: ParsedQdpx, db: ProjectDb): ImportReport {
 
   const docGuidToId = new Map<string, number>()
   for (const doc of parsed.project.documents) {
-    const content = normalizeText(doc.plainText)
+    // Os offsets do QDPX se referem a estes bytes de texto decodificados.
+    // Remover BOM ou encurtar CRLF deslocaria todas as âncoras posteriores.
+    const content = doc.plainText
     const res = db
       .insert(documents)
       .values({
@@ -118,11 +121,15 @@ function importRecords(parsed: ParsedQdpx, db: ProjectDb): ImportReport {
         sel.endPosition <= sel.startPosition ||
         sel.endPosition > content.length
       ) {
+        report.skipped.push(`Seleção fora da faixa em "${doc.name}": ${sel.startPosition}–${sel.endPosition}`)
         continue
       }
       for (const codeGuid of sel.codeGuids) {
         const codeId = codeIdByGuid.get(codeGuid)
-        if (!codeId) continue
+        if (!codeId) {
+          report.skipped.push(`Código não encontrado em "${doc.name}": ${codeGuid}`)
+          continue
+        }
         const res = db.insert(codings)
           .values({
             guid: uuid(),
@@ -142,6 +149,7 @@ function importRecords(parsed: ParsedQdpx, db: ProjectDb): ImportReport {
   // Notas: resolve targetGUID → nota; âncora inválida vira detached com o
   // texto original preservado, nunca falha o import.
   const noteBodyByGuid = new Map(parsed.project.notes.map((n) => [n.guid, n]))
+  const importedNoteGuids = new Set<string>()
   const insertNote = (
     guid: string,
     scope: 'project' | 'document' | 'excerpt',
@@ -170,9 +178,11 @@ function importRecords(parsed: ParsedQdpx, db: ProjectDb): ImportReport {
     const anchorText = status === 'detached' || scope === 'document'
       ? (found.description ?? null)
       : null
+    const repeated = importedNoteGuids.has(found.guid)
+    if (repeated) report.skipped.push(`Nota com múltiplos vínculos copiada para preservar cada vínculo: ${found.name ?? found.guid}`)
     const res = db.insert(notes)
       .values({
-        guid: found.guid || uuid(),
+        guid: repeated ? uuid() : found.guid || uuid(),
         title: found.name,
         body: found.plainText ?? '',
         scope,
@@ -182,8 +192,8 @@ function importRecords(parsed: ParsedQdpx, db: ProjectDb): ImportReport {
         anchorStatus: status,
         anchorText
       })
-      .onConflictDoNothing()
       .run()
+    importedNoteGuids.add(found.guid)
     if (res.changes > 0) report.notes += 1
   }
 
@@ -194,7 +204,7 @@ function importRecords(parsed: ParsedQdpx, db: ProjectDb): ImportReport {
   for (const doc of parsed.project.documents) {
     const documentId = docIdByGuid.get(doc.guid)
     if (documentId == null) continue
-    const docLen = normalizeText(doc.plainText).length
+    const docLen = doc.plainText.length
     for (const guid of doc.noteGuids) {
       insertNote(guid, 'document', documentId, null, null, docLen)
     }

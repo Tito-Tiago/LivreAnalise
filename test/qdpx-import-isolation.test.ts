@@ -3,9 +3,9 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { openDatabase, getActivePath, closeDatabase } from '../src/main/db'
-import { listCodes, createCode } from '../src/main/db/repositories'
+import { listCodes, createCode, listDocuments, getDocument, listCodingsByDocument, listNotesByDocument, listProjectNotes } from '../src/main/db/repositories'
 import { importProjectIntoDb } from '../src/main/qdpx/import'
-import { serializeQdpx } from '../src/main/qdpx/serialize'
+import { deserializeQdpx, serializeQdpx } from '../src/main/qdpx/serialize'
 import { importQdpxAsProject } from '../src/main/ipc/qdpx'
 import type { QdpxProject } from '../src/main/qdpx/model'
 
@@ -61,4 +61,25 @@ it('publishes the isolated import only after success', async () => {
   const result = await importQdpxAsProject(archive)
   expect(result?.path).toBe(dest)
   expect(listCodes().map((c) => c.name)).toEqual(['Importado'])
+})
+
+it('preserves CRLF, BOM and whitespace without moving imported anchors', async () => {
+  const plainText = '\uFEFFa\r\nbc'
+  const body = '  primeira linha\nsegunda linha\n'
+  const parsed = await deserializeQdpx(await serializeQdpx({
+    ...project,
+    notes: [{ guid: 'n', name: 'N', plainText: body, description: null }],
+    projectNoteGuids: ['n'],
+    documents: [{
+      guid: 'd', name: 'CRLF', plainText, noteGuids: [],
+      selections: [{ guid: 's', startPosition: 4, endPosition: 5, codeGuids: ['c'], noteGuids: ['n'] }]
+    }]
+  }))
+  importProjectIntoDb(parsed)
+  const doc = getDocument(listDocuments()[0].id)!
+  expect(doc.plainText).toBe(plainText)
+  const coding = listCodingsByDocument(doc.id)[0]
+  expect(doc.plainText.slice(coding.startPos, coding.endPos)).toBe('b')
+  expect(listProjectNotes()[0].body).toBe(body)
+  expect(listNotesByDocument(doc.id)[0].body).toBe(body)
 })

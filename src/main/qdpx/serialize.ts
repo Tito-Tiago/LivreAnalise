@@ -33,7 +33,8 @@ export async function deserializeQdpx(buffer: Buffer): Promise<ParsedQdpx> {
       zip.file(
         new RegExp(`${rel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)
       )[0]
-    if (entry) doc.plainText = await entry.async('string')
+    if (!entry) throw new Error(`Fonte de texto ausente no QDPX: "${doc.name}" (${path}). Nenhum projeto foi importado.`)
+    doc.plainText = await entry.async('string')
   }
 
   for (const note of project.notes) {
@@ -47,6 +48,7 @@ export async function deserializeQdpx(buffer: Buffer): Promise<ParsedQdpx> {
         new RegExp(`${rel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)
       )[0]
     if (entry) note.plainText = await entry.async('string')
+    else skipped.push(`Conteúdo de nota ausente: ${note.name ?? note.guid} (${path})`)
   }
 
   return { project, skipped }

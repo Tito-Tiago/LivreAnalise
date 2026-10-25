@@ -57,14 +57,6 @@ ipcMain.on(IPC.app.cancelClose, () => { quitting = false })
 
 const isDev = !app.isPackaged
 
-// Em desenvolvimento no Linux, o sandbox setuid do Chromium exige que o binario
-// chrome-sandbox pertenca ao root (mode 4755). Para evitar a necessidade de sudo
-// a cada reinstalacao, desabilitamos o sandbox apenas no modo dev.
-if (isDev && process.platform === 'linux') {
-  app.commandLine.appendSwitch('no-sandbox')
-  app.commandLine.appendSwitch('disable-setuid-sandbox')
-}
-
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
     width: 1280,

@@ -11,7 +11,7 @@
     "url": "git+https://github.com/Lucas-Tito/LivreAnalise.git"
   },
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "node scripts/dev.mjs",
     "predev": "node scripts/ensure-electron-native.mjs",
     "build": "electron-vite build",
     "start": "electron-vite preview",

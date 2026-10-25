@@ -74,6 +74,8 @@ it('waits for process cleanup before closing a window with an active operation',
 
 it('keeps the preload sandboxed and does not navigate to remote content', () => {
   expect(state.windows[0].options.webPreferences.sandbox).toBe(true)
+  expect(state.app.commandLine.appendSwitch).not.toHaveBeenCalledWith('no-sandbox')
+  expect(state.app.commandLine.appendSwitch).not.toHaveBeenCalledWith('disable-setuid-sandbox')
   const preventDefault = vi.fn()
   state.windows[0].webContents.emit('will-navigate', { preventDefault }, 'https://example.org')
   expect(preventDefault).toHaveBeenCalled()

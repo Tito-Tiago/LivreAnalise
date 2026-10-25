@@ -160,6 +160,12 @@ npm run dist:linux   # gera os instaladores localmente
 Electron + React + TypeScript, com SQLite via better-sqlite3 e Drizzle, e Tailwind na
 interface.
 
+No Linux, `npm run dev` passa `--no-sandbox` ao Electron antes da inicialização,
+evitando falhas do sandbox local (incluindo erros `No such process` em `/dev/shm`).
+Isso desabilita o sandbox **somente no launcher de desenvolvimento**; os aplicativos
+empacotados não recebem essa opção. Use o modo de desenvolvimento apenas com
+conteúdo confiável. Windows e macOS mantêm o comportamento padrão.
+
 ### O detalhe do módulo nativo
 
 O `better-sqlite3` é compilado, e o ABI do Electron é diferente do ABI do Node. Por isso

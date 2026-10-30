@@ -47,30 +47,25 @@ export function CollectionMembersDialog({ collection, onOpenChange }: Props): JS
     }
   }
 
-  // Grupo reúne categorias. Um código solto que já é membro (de projeto antigo
-  // ou importado do ATLAS.ti) continua na lista para poder ser tirado.
+  // Um grupo pode reunir códigos antes de eles serem organizados em categorias.
   const categorias = groupIds(codes)
-  const filtered = codes.filter(
-    (c) => (categorias.has(c.id) || members.has(c.id)) && casaBusca(c.name, filter)
-  )
+  const filtered = codes.filter((c) => casaBusca(c.name, filter))
 
   return (
     <Dialog open={collection !== null} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Categorias no grupo "{collection?.name}"</DialogTitle>
+          <DialogTitle>Códigos e categorias no grupo "{collection?.name}"</DialogTitle>
         </DialogHeader>
         <Input
-          placeholder="Filtrar categorias..."
+          placeholder="Filtrar códigos e categorias..."
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
         <div className="max-h-72 overflow-auto rounded-md border">
           {filtered.length === 0 ? (
             <p className="p-4 text-center text-xs text-muted-foreground">
-              {categorias.size === 0
-                ? 'Nenhuma categoria ainda. Categorias são códigos de 1º nível que já têm filhos.'
-                : 'Nenhuma categoria encontrada.'}
+              Nenhum código ou categoria encontrado.
             </p>
           ) : (
             <ul className="divide-y">
@@ -86,7 +81,7 @@ export function CollectionMembersDialog({ collection, onOpenChange }: Props): JS
                       className="h-3 w-3 rounded-full"
                       style={{ backgroundColor: c.color }}
                     />
-                    <span className="truncate">{c.name}</span>
+                    <span className="truncate">{c.name}{categorias.has(c.id) ? ' (categoria)' : ''}</span>
                   </label>
                 </li>
               ))}

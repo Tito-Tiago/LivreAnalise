@@ -72,12 +72,12 @@ extensão de uma citação pode ser ajustada arrastando as extremidades.
 A hierarquia tem exatamente três níveis:
 
 - **código** — o átomo. É o único nível que recebe citação.
-- **categoria** — um código que contém outros códigos. Não é um campo no banco: é a
-  propriedade derivada de ter filhos. Uma categoria não pode ser aplicada a um trecho.
+- **categoria** — reúne códigos e também pode ser criada vazia. Uma categoria não
+  pode ser aplicada a um trecho.
 - **grupo** — reúne categorias e códigos, de forma transversal.
 
-Categoria e grupo nascem a partir de quem eles reúnem ("criar categoria com este
-código", "criar grupo com esta categoria"), então uma categoria nunca existe vazia.
+Categoria e grupo podem nascer vazios ou a partir de quem eles reúnem ("criar
+categoria com este código", "criar grupo com esta categoria").
 
 No código-fonte os nomes são os antigos: categoria é `group` (`groupIds`,
 `createGroupFromCodes`) e grupo é `Collection` (tabela `code_groups`).

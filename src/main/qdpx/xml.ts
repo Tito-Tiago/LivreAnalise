@@ -45,7 +45,7 @@ function buildCodeNodes(codes: QdpxCode[]): XmlCodeNode[] {
       const node: XmlCodeNode = {
         '@_guid': c.guid,
         '@_name': c.name,
-        '@_isCodable': 'true'
+        '@_isCodable': c.isCodable === false ? 'false' : 'true'
       }
       if (c.color) node['@_color'] = c.color
       if (c.description) node.Description = c.description
@@ -214,7 +214,8 @@ export function parseQde(xml: string): ParseResult {
       name: node['@_name'] ?? 'Sem nome',
       color: node['@_color'],
       description: typeof node.Description === 'string' ? node.Description : null,
-      parentGuid
+      parentGuid,
+      isCodable: node['@_isCodable'] !== 'false' && node['@_isCodable'] !== '0'
     })
     for (const child of asArray<any>(node.Code)) walkCodes(child, guid)
   }

@@ -40,6 +40,7 @@ export const codes = sqliteTable('codes', {
   color: text('color').notNull().default('#2563eb'),
   description: text('description'),
   parentId: integer('parent_id'),
+  isCategory: integer('is_category', { mode: 'boolean' }).notNull().default(false),
   sortOrder: integer('sort_order').notNull().default(0),
   createdAt: text('created_at')
     .notNull()

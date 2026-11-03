@@ -46,6 +46,7 @@ export interface Code {
   color: string
   description: string | null
   parentId: number | null
+  isCategory?: boolean
   sortOrder: number
   createdAt: string
 }
@@ -88,6 +89,7 @@ export interface CreateCodeInput {
   color: string
   description?: string | null
   parentId?: number | null
+  isCategory?: boolean
 }
 
 export interface UpdateCodeInput {

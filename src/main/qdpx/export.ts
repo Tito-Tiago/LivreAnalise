@@ -34,8 +34,15 @@ export function buildProjectFromDb(projectName: string): {
     name: c.name,
     color: c.color,
     description: c.description,
-    parentGuid: c.parentId ? codeGuidById.get(c.parentId) ?? null : null
+    parentGuid: c.parentId ? codeGuidById.get(c.parentId) ?? null : null,
+    // Categorias que já tinham citações precisam continuar codificáveis no QDPX.
+    isCodable: !c.isCategory || c.usageCount > 0
   }))
+  for (const code of codes) {
+    if (code.isCategory && code.usageCount > 0 && !codes.some((c) => c.parentId === code.id)) {
+      warnings.push(`A categoria vazia "${code.name}" possui citações e será exportada como código para preservá-las.`)
+    }
+  }
 
   const groups = listCollections()
   const qdpxSets: QdpxSet[] = groups.map((g) => ({

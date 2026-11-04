@@ -58,6 +58,7 @@ import { CodeDialog, type CodeDialogValue } from './CodeDialog'
 import { SimplePromptDialog } from './SimplePromptDialog'
 import { CollectionMembersDialog } from './CollectionMembersDialog'
 import { CategoryCodesDialog } from './CategoryCodesDialog'
+import { MemoDialog, type MemoTarget } from './MemoDialog'
 import { SearchButton, SearchField } from './SearchField'
 import { randomColor } from '@/lib/utils'
 import { mensagemDeErro } from '@/lib/erros'
@@ -114,6 +115,7 @@ type DropIntent =
 type DropKind = 'up' | 'down' | 'group' | 'inside' | 'root' | 'same'
 
 export function CodesPanel({ onViewCode }: Props): JSX.Element {
+  const [memoTarget, setMemoTarget] = useState<MemoTarget | null>(null)
   const codes = useAppStore((s) => s.codes)
   const collections = useAppStore((s) => s.collections)
   const collectionMembers = useAppStore((s) => s.collectionMembers)
@@ -960,6 +962,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
                   />
                 )}
                 <span className="truncate">{node.code.name}</span>
+                {node.code.memo && <span title="Possui memo" aria-label="Possui memo" className="text-xs text-muted-foreground">✎</span>}
                 {node.code.usageCount > 0 && (
                   <span className="ml-auto shrink-0 rounded bg-muted px-1.5 text-xs text-muted-foreground">
                     {node.code.usageCount}
@@ -977,6 +980,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => setMemoTarget({ id: node.code.id, name: node.code.name, kind: isCategory ? 'categoria' : 'código', memo: node.code.memo ?? '' })}>Abrir memo</DropdownMenuItem>
                   {(!isCategory || node.code.usageCount > 0) && <DropdownMenuItem onClick={() => onViewCode(node.code)}>
                     <List className="h-4 w-4" /> Ver trechos
                   </DropdownMenuItem>}
@@ -1070,6 +1074,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent>
+            <ContextMenuItem onClick={() => setMemoTarget({ id: node.code.id, name: node.code.name, kind: isCategory ? 'categoria' : 'código', memo: node.code.memo ?? '' })}>Abrir memo</ContextMenuItem>
             <ContextMenuItem
               onClick={() => setDialogState({ mode: 'create' })}
             >
@@ -1215,6 +1220,8 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
                   const isCollapsed = recolhido(key)
                   return (
                     <li key={key}>
+                      <ContextMenu>
+                      <ContextMenuTrigger asChild>
                       <div data-collection-row={node.collection.id} className={`group flex items-center gap-1 rounded-md px-1 py-1 text-sm hover:bg-accent/50 ${dropCollection === node.collection.id ? `code-drop-inside ${dropKind === 'same' ? 'code-drop-same' : ''}` : ''}`}>
                         <button
                           aria-label={`${isCollapsed ? 'Expandir' : 'Recolher'} ${node.collection.name}`}
@@ -1236,6 +1243,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
                           <span className="truncate">
                             {node.collection.name}
                           </span>
+                          {node.collection.memo && <span title="Possui memo" aria-label="Possui memo" className="text-xs text-muted-foreground">✎</span>}
                         </button>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -1244,6 +1252,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
                             </button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => setMemoTarget({ id: node.collection.id, name: node.collection.name, kind: 'grupo', memo: node.collection.memo ?? '' })}>Abrir memo</DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() =>
                                 setMembersCollection(node.collection)
@@ -1278,6 +1287,11 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent>
+                        <ContextMenuItem onClick={() => setMemoTarget({ id: node.collection.id, name: node.collection.name, kind: 'grupo', memo: node.collection.memo ?? '' })}>Abrir memo</ContextMenuItem>
+                      </ContextMenuContent>
+                      </ContextMenu>
                       {!isCollapsed && (
                         <ul>
                           {node.children.map((c) =>
@@ -1336,6 +1350,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
         </div>
       )}
 
+      {memoTarget && <MemoDialog target={memoTarget} onClose={() => setMemoTarget(null)} />}
       <CodeDialog
         open={dialogState !== null}
         onOpenChange={(o) => !o && setDialogState(null)}

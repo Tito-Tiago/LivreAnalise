@@ -1,5 +1,6 @@
 import { readFile, stat } from 'fs/promises'
 import { v4 as uuid } from 'uuid'
+import { eq } from 'drizzle-orm'
 import type { ImportReport } from '@shared/types'
 import { getDb, type ProjectDb } from '../db'
 import {
@@ -154,6 +155,21 @@ function importRecords(parsed: ParsedQdpx, db: ProjectDb): ImportReport {
   // texto original preservado, nunca falha o import.
   const noteBodyByGuid = new Map(parsed.project.notes.map((n) => [n.guid, n]))
   const importedNoteGuids = new Set<string>()
+  const codeMemoGuids = new Set<string>()
+  for (const code of parsed.project.codes) {
+    const id = codeIdByGuid.get(code.guid)
+    if (id == null) continue
+    const refs = code.noteGuids ?? []
+    const first = refs.find((guid) => noteBodyByGuid.has(guid))
+    for (const guid of refs) if (!noteBodyByGuid.has(guid)) report.skipped.push(`NoteRef de código sem Note: ${guid}`)
+    if (first) {
+      db.update(codes).set({ memo: noteBodyByGuid.get(first)!.plainText }).where(eq(codes.id, id)).run()
+      codeMemoGuids.add(first)
+    }
+    if (refs.filter((guid) => noteBodyByGuid.has(guid)).length > 1) {
+      report.skipped.push(`Notas adicionais do código "${code.name}" foram preservadas como notas de projeto quando necessário.`)
+    }
+  }
   const insertNote = (
     guid: string,
     scope: 'project' | 'document' | 'excerpt',
@@ -220,6 +236,7 @@ function importRecords(parsed: ParsedQdpx, db: ProjectDb): ImportReport {
   }
   // Notas em Notes sem nenhum NoteRef: preserva como nota de projeto + aviso.
   const referenced = new Set<string>([
+    ...codeMemoGuids,
     ...parsed.project.projectNoteGuids,
     ...parsed.project.documents.flatMap((d) => d.noteGuids),
     ...parsed.project.documents.flatMap((d) => d.selections.flatMap((s) => s.noteGuids))

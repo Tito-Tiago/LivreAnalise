@@ -5,6 +5,7 @@ export interface QdpxCode {
   description?: string | null
   parentGuid: string | null
   isCodable?: boolean
+  noteGuids?: string[]
 }
 
 export interface QdpxSelection {

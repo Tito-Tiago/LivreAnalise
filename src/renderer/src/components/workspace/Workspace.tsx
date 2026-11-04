@@ -19,6 +19,11 @@ export function Workspace(): JSX.Element {
     () =>
       window.api.app.onCloseRequested(async () => {
         try {
+          const sairDoMemo = useAppStore.getState().sairDoMemo
+          if (sairDoMemo && !(await sairDoMemo())) {
+            window.api.app.cancelClose()
+            return
+          }
           if (!(await podeSairDoTexto())) {
             window.api.app.cancelClose()
             return

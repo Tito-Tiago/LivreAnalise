@@ -121,6 +121,8 @@ interface AppState {
   registerTextoAcoes: (acoes: AppState['textoAcoes']) => void
   podeSairDoTexto: () => Promise<boolean>
   responderSaidaDoTexto: (ok: boolean) => void
+  sairDoMemo: (() => Promise<boolean>) | null
+  registerSairDoMemo: (fn: (() => Promise<boolean>) | null) => void
 }
 
 async function refreshAfterHistory(
@@ -235,6 +237,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   createProject: async () => {
+    if (get().sairDoMemo && !(await get().sairDoMemo!())) return
     if (!(await get().podeSairDoTexto())) return
     await get().notesFlush?.()
     const result = await window.api.project.create()
@@ -256,6 +259,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   // "Abrir projeto" aceita .liva e .qdpx (#41). O .qdpx vira um projeto novo e
   // volta com o relatório da importação.
   openProject: async () => {
+    if (get().sairDoMemo && !(await get().sairDoMemo!())) return
     if (!(await get().podeSairDoTexto())) return
     await get().notesFlush?.()
     const result = await window.api.project.open()
@@ -279,6 +283,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   openRecent: async (path) => {
+    if (get().sairDoMemo && !(await get().sairDoMemo!())) return
     if (!(await get().podeSairDoTexto())) return
     await get().notesFlush?.()
     const result = await window.api.project.openPath(path)
@@ -289,6 +294,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   closeProject: async () => {
+    if (get().sairDoMemo && !(await get().sairDoMemo!())) return
     if (!(await get().podeSairDoTexto())) return
     await get().notesFlush?.()
     await window.api.project.close()
@@ -445,6 +451,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   undo: async () => {
+    if (get().sairDoMemo && !(await get().sairDoMemo!())) return null
     if (!(await get().podeSairDoTexto())) return null
     await get().notesFlush?.()
     const label = await window.api.history.undo()
@@ -453,6 +460,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   redo: async () => {
+    if (get().sairDoMemo && !(await get().sairDoMemo!())) return null
     if (!(await get().podeSairDoTexto())) return null
     await get().notesFlush?.()
     const label = await window.api.history.redo()
@@ -481,6 +489,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   restoreVersion: async (id) => {
+    if (get().sairDoMemo && !(await get().sairDoMemo!())) return
     if (!(await get().podeSairDoTexto())) return
     await get().notesFlush?.()
     const result = await window.api.versions.restore(id)
@@ -646,6 +655,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   registerNotesFlush: (fn) => set({ notesFlush: fn }),
+  sairDoMemo: null,
+  registerSairDoMemo: (fn) => set({ sairDoMemo: fn }),
   notasSujo: false,
   setNotasSujo: (sujo) => {
     if (get().notasSujo === sujo) return

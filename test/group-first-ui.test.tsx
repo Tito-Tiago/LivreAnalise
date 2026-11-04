@@ -19,6 +19,29 @@ it('creates an empty group from the code panel context menu', async () => {
   await waitFor(() => expect(createCollection).toHaveBeenCalledWith({ name: 'Objetivo' }))
 })
 
+it('creates an empty category from the code panel context menu', async () => {
+  const createCode = vi.fn().mockResolvedValue({ id: 1, name: 'Tema' })
+  useAppStore.setState({ codes: [], collections: [], collectionMembers: [], createCode })
+  const { container } = render(<CodesPanel onViewCode={() => {}} />)
+  fireEvent.contextMenu(container.querySelector('[data-code-root]')!)
+  await userEvent.click(await screen.findByRole('menuitem', { name: 'Nova categoria' }))
+  await userEvent.type(screen.getByLabelText('Nome da categoria'), 'Tema')
+  await userEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+  await waitFor(() => expect(createCode).toHaveBeenCalledWith(expect.objectContaining({ name: 'Tema', isCategory: true })))
+})
+
+it('allows viewing citations on a code that became a category', async () => {
+  const parent = { id: 2, guid: 'parent', name: 'Categoria', color: '#000000', description: null,
+    parentId: null, isCategory: true, sortOrder: 0, createdAt: '', usageCount: 1 }
+  const child = { ...parent, id: 3, guid: 'child', name: 'Filho', parentId: 2, isCategory: false, usageCount: 0 }
+  const onViewCode = vi.fn()
+  useAppStore.setState({ codes: [parent, child], collections: [], collectionMembers: [] })
+  render(<CodesPanel onViewCode={onViewCode} />)
+  await userEvent.click(screen.getByRole('button', { name: 'Ações de Categoria' }))
+  await userEvent.click(await screen.findByRole('menuitem', { name: 'Ver trechos' }))
+  expect(onViewCode).toHaveBeenCalledWith(parent)
+})
+
 it('offers loose codes for membership in an empty group', async () => {
   const addCollectionMember = vi.fn().mockResolvedValue(undefined)
   useAppStore.setState({

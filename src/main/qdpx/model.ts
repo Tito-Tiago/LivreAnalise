@@ -4,6 +4,7 @@ export interface QdpxCode {
   color?: string
   description?: string | null
   parentGuid: string | null
+  isCodable?: boolean
 }
 
 export interface QdpxSelection {

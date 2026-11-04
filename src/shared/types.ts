@@ -45,6 +45,7 @@ export interface Code {
   name: string
   color: string
   description: string | null
+  memo: string
   parentId: number | null
   isCategory?: boolean
   sortOrder: number
@@ -60,6 +61,7 @@ export interface Collection {
   guid: string
   name: string
   description: string | null
+  memo: string
   sortOrder: number
 }
 
@@ -97,6 +99,7 @@ export interface UpdateCodeInput {
   name?: string
   color?: string
   description?: string | null
+  memo?: string
   parentId?: number | null
   sortOrder?: number
 }
@@ -132,6 +135,7 @@ export interface UpdateCollectionInput {
   id: number
   name?: string
   description?: string | null
+  memo?: string
   sortOrder?: number
 }
 

@@ -349,6 +349,7 @@ export function listCodes(): CodeWithCount[] {
       name: codes.name,
       color: codes.color,
       description: codes.description,
+      memo: codes.memo,
       parentId: codes.parentId,
       isCategory: codes.isCategory,
       sortOrder: codes.sortOrder,
@@ -448,6 +449,7 @@ export function updateCode(input: UpdateCodeInput): void {
   if (input.name !== undefined) patch.name = input.name
   if (input.color !== undefined) patch.color = input.color
   if (input.description !== undefined) patch.description = input.description
+  if (input.memo !== undefined) patch.memo = input.memo
   if (input.parentId !== undefined) patch.parentId = input.parentId
   if (input.sortOrder !== undefined) patch.sortOrder = input.sortOrder
   if (Object.keys(patch).length === 0) return
@@ -470,11 +472,13 @@ export function updateCode(input: UpdateCodeInput): void {
         ? `remover "${after.name}" da categoria`
         : `mover "${after.name}"`
       : `editar código "${after.name}"`,
+    coalesceKey: Object.keys(patch).length === 1 && input.memo !== undefined ? `memo:code:${input.id}` : undefined,
     undo: () => {
       getDb().update(codes).set({
         name: beforeSnap.name,
         color: beforeSnap.color,
         description: beforeSnap.description,
+        memo: beforeSnap.memo,
         parentId: beforeSnap.parentId,
         sortOrder: beforeSnap.sortOrder
       }).where(eq(codes.id, beforeSnap.id)).run()
@@ -489,6 +493,7 @@ export function updateCode(input: UpdateCodeInput): void {
         name: afterSnap.name,
         color: afterSnap.color,
         description: afterSnap.description,
+        memo: afterSnap.memo,
         parentId: afterSnap.parentId,
         sortOrder: afterSnap.sortOrder
       }).where(eq(codes.id, afterSnap.id)).run()
@@ -791,8 +796,10 @@ export function updateCollection(input: UpdateCollectionInput): void {
   const patch: Record<string, unknown> = {}
   if (input.name !== undefined) patch.name = input.name
   if (input.description !== undefined) patch.description = input.description
+  if (input.memo !== undefined) patch.memo = input.memo
   if (input.sortOrder !== undefined) patch.sortOrder = input.sortOrder
   if (Object.keys(patch).length === 0) return
+  if (Object.entries(patch).every(([key, value]) => (before as unknown as Record<string, unknown>)[key] === value)) return
   db.update(collections).set(patch).where(eq(collections.id, input.id)).run()
   touchProject()
   const after = getCollection(input.id)
@@ -800,12 +807,13 @@ export function updateCollection(input: UpdateCollectionInput): void {
   const a = { ...after }
   pushHistory({
     label: `editar grupo "${a.name}"`,
+    coalesceKey: Object.keys(patch).length === 1 && input.memo !== undefined ? `memo:group:${input.id}` : undefined,
     undo: () => {
-      getDb().update(collections).set({ name: b.name, description: b.description, sortOrder: b.sortOrder }).where(eq(collections.id, b.id)).run()
+      getDb().update(collections).set({ name: b.name, description: b.description, memo: b.memo, sortOrder: b.sortOrder }).where(eq(collections.id, b.id)).run()
       touchProject()
     },
     redo: () => {
-      getDb().update(collections).set({ name: a.name, description: a.description, sortOrder: a.sortOrder }).where(eq(collections.id, a.id)).run()
+      getDb().update(collections).set({ name: a.name, description: a.description, memo: a.memo, sortOrder: a.sortOrder }).where(eq(collections.id, a.id)).run()
       touchProject()
     }
   })

@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useAppStore } from '@/stores/appStore'
 import type { Collection } from '@shared/types'
+import { MemoEditor } from './MemoDialog'
 
 interface Props {
   collection: Collection | null
@@ -20,10 +21,12 @@ interface Props {
 
 export function CollectionMembersDialog({ collection, onOpenChange }: Props): JSX.Element {
   const codes = useAppStore((s) => s.codes)
+  const collections = useAppStore((s) => s.collections)
   const addCollectionMember = useAppStore((s) => s.addCollectionMember)
   const removeCollectionMember = useAppStore((s) => s.removeCollectionMember)
   const [members, setMembers] = useState<Set<number>>(new Set())
   const [filter, setFilter] = useState('')
+  const [memoOpen, setMemoOpen] = useState(false)
 
   useEffect(() => {
     if (collection) {
@@ -52,11 +55,25 @@ export function CollectionMembersDialog({ collection, onOpenChange }: Props): JS
   const filtered = codes.filter((c) => casaBusca(c.name, filter))
 
   return (
-    <Dialog open={collection !== null} onOpenChange={onOpenChange}>
-      <DialogContent>
+    <Dialog open={collection !== null} onOpenChange={(open) => {
+      void (async () => {
+        if (!open && memoOpen && !(await useAppStore.getState().sairDoMemo?.())) return
+        onOpenChange(open)
+      })()
+    }}>
+      <DialogContent className={memoOpen ? 'flex h-[80vh] max-h-[90vh] w-[90vw] max-w-4xl flex-col' : undefined}>
         <DialogHeader>
           <DialogTitle>Códigos e categorias no grupo "{collection?.name}"</DialogTitle>
         </DialogHeader>
+        <div className="flex gap-2">
+          <Button size="sm" variant={memoOpen ? 'outline' : 'secondary'} onClick={() => {
+            if (memoOpen) void useAppStore.getState().sairDoMemo?.()
+          }}>Códigos e categorias</Button>
+          <Button size="sm" variant={memoOpen ? 'secondary' : 'outline'} onClick={() => setMemoOpen(true)}>Memo{(collections.find((c) => c.id === collection?.id)?.memo ?? collection?.memo) ? ' •' : ''}</Button>
+        </div>
+        {memoOpen && collection ? (
+          <MemoEditor target={{ id: collection.id, name: collection.name, kind: 'grupo', memo: collections.find((c) => c.id === collection.id)?.memo ?? collection.memo ?? '' }} onClose={() => setMemoOpen(false)} showHint />
+        ) : <>
         <Input
           placeholder="Filtrar códigos e categorias..."
           value={filter}
@@ -91,6 +108,7 @@ export function CollectionMembersDialog({ collection, onOpenChange }: Props): JS
         <DialogFooter>
           <Button onClick={() => onOpenChange(false)}>Concluir</Button>
         </DialogFooter>
+        </>}
       </DialogContent>
     </Dialog>
   )

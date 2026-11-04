@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webFrame } from 'electron'
 import { IPC, type Api } from '@shared/ipc'
 
 const api: Api = {
@@ -103,6 +103,7 @@ const api: Api = {
     }
   },
   view: {
+    setInterfaceScale: (scale) => webFrame.setZoomFactor(scale),
     // o menu da janela precisa saber qual fonte esta ativa para marcar o radio
     notifyFont: (font: string) => ipcRenderer.send(IPC.view.fontChanged, font),
     onAction: (listener) => {

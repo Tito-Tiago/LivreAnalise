@@ -59,7 +59,7 @@ const api: Api = {
     delete: (id) => ipcRenderer.invoke(IPC.notes.delete, id)
   },
   transcription: {
-    env: () => ipcRenderer.invoke(IPC.transcription.env),
+    env: (binaryPath) => ipcRenderer.invoke(IPC.transcription.env, binaryPath),
     models: () => ipcRenderer.invoke(IPC.transcription.models),
     modelSize: (modelId) => ipcRenderer.invoke(IPC.transcription.modelSize, modelId),
     pickMedia: () => ipcRenderer.invoke(IPC.transcription.pickMedia),
@@ -124,6 +124,7 @@ const api: Api = {
     }
   },
   app: {
+    setNotesDirty: (dirty) => ipcRenderer.send(IPC.app.notesDirty, dirty),
     setTextDirty: (dirty) => ipcRenderer.send(IPC.app.textDirty, dirty),
     onCloseRequested: (listener) => {
       const handler = (): void => listener()
@@ -132,7 +133,8 @@ const api: Api = {
         ipcRenderer.removeListener(IPC.app.closeRequested, handler)
       }
     },
-    confirmClose: () => ipcRenderer.send(IPC.app.confirmClose)
+    confirmClose: () => ipcRenderer.send(IPC.app.confirmClose),
+    cancelClose: () => ipcRenderer.send(IPC.app.cancelClose)
   }
 }
 

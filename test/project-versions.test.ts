@@ -1,5 +1,5 @@
 import { createRequire } from 'module'
-import { mkdtempSync, rmSync } from 'fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -77,5 +77,14 @@ describe.skipIf(!nativeOk)('project versions (integration)', () => {
     const kept2 = versions.pruneVersions(projectPath)
     expect(kept2.some((e) => e.label === 'marco')).toBe(true)
     db.closeDatabase()
+  })
+
+  it('does not treat a damaged catalog as an empty history or overwrite it', async () => {
+    await versions.createVersionSnapshot(projectPath)
+    const manifest = join(versions.versionsDir(projectPath), 'manifest.json')
+    writeFileSync(manifest, '{truncated')
+    expect(() => versions.readManifest(projectPath)).toThrow('catálogo')
+    await expect(versions.createVersionSnapshot(projectPath)).rejects.toThrow('catálogo')
+    expect(readFileSync(manifest, 'utf8')).toBe('{truncated')
   })
 })

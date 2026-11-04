@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { basename } from 'path'
+import { existsSync } from 'fs'
 import { v4 as uuid } from 'uuid'
 import { IPC } from '@shared/ipc'
 import type {
@@ -23,6 +24,7 @@ import { clearHistoryFor } from '../history/stack'
 import { createVersionSnapshot, snapshotBeforeMigration } from '../services/projectVersions'
 import { SAVE_DIALOG_PROPERTIES } from './saveDialog'
 import { importQdpxAsProject } from './qdpx'
+import { withProjectOperation } from '../services/projectOperation'
 
 const PROJECT_EXT = 'liva'
 
@@ -56,7 +58,7 @@ export function ensureMeta(name: string): ProjectMeta {
 }
 
 export function registerProjectHandlers(): void {
-  ipcMain.handle(IPC.project.create, async (): Promise<OpenProjectResult | null> => {
+  ipcMain.handle(IPC.project.create, () => withProjectOperation(async (): Promise<OpenProjectResult | null> => {
     const result = await dialog.showSaveDialog({
       title: 'Criar novo projeto',
       defaultPath: `projeto.${PROJECT_EXT}`,
@@ -65,19 +67,20 @@ export function registerProjectHandlers(): void {
     })
     if (result.canceled || !result.filePath) return null
     const path = result.filePath
+    if (existsSync(path)) throw new Error('Escolha um arquivo novo: criar projeto não substitui projetos existentes.')
     // Reabrir = nova sessão: o histórico do projeto anterior não vale mais.
     const prev = getActivePath()
-    if (prev) clearHistoryFor(prev)
     openDatabase(path)
+    if (prev) clearHistoryFor(prev)
     const name = basename(path).replace(/\.liva$/i, '')
     const meta = ensureMeta(name)
     pushRecent(path, meta.name)
     return { meta, path }
-  })
+  }))
 
   ipcMain.handle(
     IPC.project.open,
-    async (): Promise<(OpenProjectResult & { report?: ImportReport }) | null> => {
+    () => withProjectOperation(async (): Promise<(OpenProjectResult & { report?: ImportReport }) | null> => {
       const result = await dialog.showOpenDialog({
         title: 'Abrir projeto',
         properties: ['openFile'],
@@ -91,34 +94,34 @@ export function registerProjectHandlers(): void {
       const path = result.filePaths[0]
       if (/\.qdpx$/i.test(path)) return importQdpxAsProject(path)
       return openProjectPath(path)
-    }
+    })
   )
 
   ipcMain.handle(
     IPC.project.openPath,
-    async (_e, path: string): Promise<OpenProjectResult | null> => {
+    (_e, path: string) => withProjectOperation(async (): Promise<OpenProjectResult | null> => {
       return openProjectPath(path)
-    }
+    })
   )
 
   ipcMain.handle(IPC.project.current, async (): Promise<ProjectMeta | null> => {
     return readMeta()
   })
 
-  ipcMain.handle(IPC.project.close, async (): Promise<void> => {
+  ipcMain.handle(IPC.project.close, () => withProjectOperation(async (): Promise<void> => {
     const path = getActivePath()
     closeDatabase()
     if (path) clearHistoryFor(path)
-  })
+  }))
 
   ipcMain.handle(
     IPC.project.rename,
     async (_e, path: string, name: string): Promise<RenameProjectResult> =>
-      renameProject(path, name)
+      withProjectOperation(async () => renameProject(path, name))
   )
 
   ipcMain.handle(IPC.project.trash, async (_e, path: string): Promise<void> => {
-    await trashProject(path)
+    await withProjectOperation(() => trashProject(path))
   })
 
   ipcMain.handle(IPC.project.recents, async () => {
@@ -129,9 +132,8 @@ export function registerProjectHandlers(): void {
   })
 }
 
-function openProjectPath(path: string): OpenProjectResult | null {
+async function openProjectPath(path: string): Promise<OpenProjectResult | null> {
   const prev = getActivePath()
-  if (prev) clearHistoryFor(prev)
   // Antes de abrir (e portanto antes de migrar): so faz copia quando o arquivo
   // esta atrasado. Melhor esforco -- se falhar, a abertura segue, porque
   // recusar abrir o projeto por causa do backup seria pior que nao ter backup.
@@ -141,12 +143,13 @@ function openProjectPath(path: string): OpenProjectResult | null {
     console.error(`[versoes] copia pre-migracao falhou: ${(err as Error)?.message ?? err}`)
   }
   openDatabase(path)
+  if (prev) clearHistoryFor(prev)
   const name = basename(path).replace(/\.liva$/i, '')
   const meta = ensureMeta(name)
   pushRecent(getActivePath() as string, meta.name)
   // 1 checkpoint automático por abertura (retenção poda os antigos).
   // Melhor esforço: nunca bloqueia a abertura, mas o erro é registrado.
-  createVersionSnapshot(path, { kind: 'auto', label: null })
+  await createVersionSnapshot(path, { kind: 'auto', label: null })
     .then(() => {
       if (getActivePath() !== path) return
       for (const window of BrowserWindow.getAllWindows()) {

@@ -127,9 +127,11 @@ export const IPC = {
     fontChanged: 'view:font-changed'
   },
   app: {
+    notesDirty: 'app:notes-dirty',
     textDirty: 'app:text-dirty',
     closeRequested: 'app:close-requested',
-    confirmClose: 'app:confirm-close'
+    confirmClose: 'app:confirm-close',
+    cancelClose: 'app:cancel-close'
   }
 } as const
 
@@ -186,12 +188,12 @@ export interface Api {
     delete: (id: number) => Promise<void>
   }
   transcription: {
-    env: () => Promise<TranscriptionEnv>
+    env: (binaryPath?: string | null) => Promise<TranscriptionEnv>
     models: () => Promise<TranscriptionModel[]>
     modelSize: (modelId: string) => Promise<number>
     pickMedia: () => Promise<string | null>
     downloadModel: (modelId: string) => Promise<boolean>
-    downloadBinary: () => Promise<string>
+    downloadBinary: () => Promise<string | null>
     start: (input: TranscriptionStartInput) => Promise<void>
     cancel: () => Promise<void>
     onEvent: (listener: (event: TranscriptionEvent) => void) => () => void
@@ -213,9 +215,11 @@ export interface Api {
     onAction: (listener: (action: string) => void) => () => void
   }
   app: {
+    setNotesDirty: (dirty: boolean) => void
     setTextDirty: (dirty: boolean) => void
     onCloseRequested: (listener: () => void) => () => void
     confirmClose: () => void
+    cancelClose: () => void
   }
   history: {
     state: () => Promise<HistoryState>

@@ -213,6 +213,7 @@ export interface Api {
   }
   view: {
     notifyFont: (font: string) => void
+    setInterfaceScale: (scale: number) => void
     onAction: (listener: (action: string) => void) => () => void
   }
   app: {

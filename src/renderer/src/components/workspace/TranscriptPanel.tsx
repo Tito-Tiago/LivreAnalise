@@ -155,6 +155,7 @@ export function TranscriptPanel(): JSX.Element {
   const backdropRef = useRef<HTMLDivElement>(null)
   const backdropContentRef = useRef<HTMLDivElement>(null)
   const viewportRef = useRef<TranscriptViewport | null>(null)
+  const historyViewportRef = useRef<TranscriptViewport | null>(null)
   const [pending, setPending] = useState<PendingSelection | null>(null)
   const [excerptMenu, setExcerptMenu] = useState<{
     x: number; y: number; codingIds: number[]; noteIds: number[]
@@ -558,6 +559,29 @@ export function TranscriptPanel(): JSX.Element {
     }
   }
 
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (!editing || !textarea) return
+    // O undo nativo pode restaurar a rolagem antiga da transação (até o topo).
+    // Guarda o trecho visível antes de o navegador alterar o campo, sem
+    // interceptar o desfazer nem substituir a seleção restaurada por ele.
+    const beforeInput = (event: InputEvent): void => {
+      historyViewportRef.current = null
+      if (event.inputType !== 'historyUndo' && event.inputType !== 'historyRedo') return
+      const backdrop = backdropRef.current
+      const content = backdropContentRef.current
+      if (backdrop && content) {
+        syncScroll()
+        historyViewportRef.current = captureTranscriptViewport(backdrop, content)
+      }
+    }
+    textarea.addEventListener('beforeinput', beforeInput)
+    return () => {
+      textarea.removeEventListener('beforeinput', beforeInput)
+      historyViewportRef.current = null
+    }
+  }, [editing])
+
   const handleEditHover = (e: React.MouseEvent<HTMLDivElement>): void => {
     const backdrop = backdropRef.current
     if (!backdrop) return
@@ -748,7 +772,17 @@ export function TranscriptPanel(): JSX.Element {
   }, [editing])
 
   useLayoutEffect(() => {
-    if (editing) syncScroll()
+    if (!editing) return
+    const viewport = historyViewportRef.current
+    const backdrop = backdropRef.current
+    const content = backdropContentRef.current
+    const textarea = textareaRef.current
+    if (viewport && backdrop && content && textarea) {
+      restoreTranscriptViewport(backdrop, content, viewport)
+      textarea.scrollTop = backdrop.scrollTop
+    }
+    historyViewportRef.current = null
+    syncScroll()
   }, [editing, draft])
 
   useLayoutEffect(() => {
@@ -880,14 +914,24 @@ export function TranscriptPanel(): JSX.Element {
     setEditing(true)
   }
 
-  const cancelEditing = async (): Promise<void> => {
-    if (!(await podeSairDoTexto())) return
+  const discardEditing = (): void => {
     if (backdropRef.current) {
+      syncScroll()
       const viewport = captureTranscriptViewport(backdropRef.current, backdropRef.current)
       viewportRef.current = remapTranscriptViewport(viewport, draft, text)
     }
     setEditing(false)
     setDraft('')
+  }
+
+  const cancelEditing = async (): Promise<void> => {
+    // Com alterações pendentes, Salvar/Descartar no diálogo já encerra a
+    // edição. Não tentar capturar a posição depois de desmontar o campo.
+    if (draft !== text) {
+      await podeSairDoTexto()
+      return
+    }
+    discardEditing()
   }
 
   const saveEditing = async (): Promise<boolean> => {
@@ -939,13 +983,12 @@ export function TranscriptPanel(): JSX.Element {
 
   const saveRef = useRef(saveEditing)
   saveRef.current = saveEditing
+  const discardRef = useRef(discardEditing)
+  discardRef.current = discardEditing
   useEffect(() => {
     registerTextoAcoes({
       salvar: () => saveRef.current(),
-      descartar: () => {
-        setEditing(false)
-        setDraft('')
-      }
+      descartar: () => discardRef.current()
     })
     return () => registerTextoAcoes(null)
   }, [registerTextoAcoes])
@@ -1143,7 +1186,15 @@ export function TranscriptPanel(): JSX.Element {
             <textarea
               ref={textareaRef}
               value={draft}
-              onChange={(e) => setDraft(applyTextareaChange(draft, e.target.value))}
+              onChange={(e) => {
+                const next = applyTextareaChange(draft, e.target.value)
+                const inputType = (e.nativeEvent as InputEvent).inputType
+                const viewport = historyViewportRef.current
+                historyViewportRef.current = viewport && (inputType === 'historyUndo' || inputType === 'historyRedo')
+                  ? remapTranscriptViewport(viewport, draft, next)
+                  : null
+                setDraft(next)
+              }}
               aria-label={`Texto de ${currentDocument.name}`}
               onKeyDown={(e) => {
                 if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {

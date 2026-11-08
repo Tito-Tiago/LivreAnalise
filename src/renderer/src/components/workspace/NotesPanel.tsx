@@ -13,6 +13,8 @@ import {
 } from 'lucide-react'
 import { useAppStore } from '@/stores/appStore'
 import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
+import { useScrollMemory } from '@/lib/useScrollMemory'
 import { cn } from '@/lib/utils'
 import { mensagemDeErro } from '@/lib/erros'
 import { createNoteSaver } from '@/lib/noteAutosave'
@@ -242,7 +244,7 @@ function NoteEditor({ note, onBack }: { note: Note; onBack: () => void }): JSX.E
           placeholder="Título da nota"
           className="mb-2 h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         />
-        <textarea
+        <Textarea
           aria-label="Conteúdo da nota"
           value={body}
           onChange={(e) => handleChange(title, e.target.value)}
@@ -267,9 +269,12 @@ export function NotesPanel(): JSX.Element {
   const { error: navigationError, run } = useAsyncAction()
 
   const [filter, setFilter] = useState('')
+  const listRef = useRef<HTMLDivElement>(null)
+  const listPosition = useRef({ top: 0, left: 0 })
 
   const allNotes = [...documentNotes, ...projectNotes]
   const editingNote = allNotes.find((n) => n.id === editorNoteId) ?? null
+  useScrollMemory(listRef, listPosition, !editingNote)
 
   const matches = (n: Note): boolean => {
     if (filter.trim() === '') return true
@@ -349,7 +354,7 @@ export function NotesPanel(): JSX.Element {
               className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             />
           </div>
-          <div className="min-h-0 flex-1 space-y-4 overflow-auto p-3">
+          <div ref={listRef} className="min-h-0 flex-1 space-y-4 overflow-auto p-3">
             {currentDocument && (
               <section>
                 <div className="mb-1 flex items-center gap-1">

@@ -21,6 +21,8 @@ interface Props {
 
 export function Sidebar({ onViewCode }: Props): JSX.Element {
   const [tab, setTab] = useState<Tab>('documents')
+  const documentsScroll = useRef({ top: 0, left: 0 })
+  const codesScroll = useRef({ top: 0, left: 0 })
   const [width, setWidth] = useState(() => {
     const stored = Number(localStorage.getItem(WIDTH_KEY))
     return stored >= MIN_WIDTH && stored <= MAX_WIDTH ? stored : DEFAULT_WIDTH
@@ -79,7 +81,12 @@ export function Sidebar({ onViewCode }: Props): JSX.Element {
           {tabs.map((t) => (
             <button
               key={t.id}
-               onClick={() => setTab(t.id)}
+              onClick={async () => {
+                if (tab === t.id) return
+                const leave = useAppStore.getState().sairDaRenomeacao
+                if (leave && !(await leave())) return
+                setTab(t.id)
+              }}
                aria-pressed={tab === t.id}
               className={cn(
                 'flex flex-1 flex-col items-center gap-1 py-2 text-xs transition-colors',
@@ -94,8 +101,8 @@ export function Sidebar({ onViewCode }: Props): JSX.Element {
           ))}
         </div>
         <div className="min-h-0 flex-1">
-          {tab === 'documents' && <DocumentsPanel />}
-          {tab === 'codes' && <CodesPanel onViewCode={onViewCode} />}
+          {tab === 'documents' && <DocumentsPanel scrollPosition={documentsScroll} />}
+          {tab === 'codes' && <CodesPanel onViewCode={onViewCode} scrollPosition={codesScroll} />}
         </div>
       </div>
       <div

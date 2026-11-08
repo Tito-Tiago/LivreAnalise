@@ -14,11 +14,21 @@ export function Workspace(): JSX.Element {
   const notesPanelOpen = useAppStore((s) => s.notesPanelOpen)
   const podeSairDoTexto = useAppStore((s) => s.podeSairDoTexto)
 
-  // O main só pede isto quando há texto não salvo (#31).
+  // O main pede isto quando há edição ou renomeação ainda não salva.
   useEffect(
     () =>
       window.api.app.onCloseRequested(async () => {
         try {
+          const sairDaRenomeacao = useAppStore.getState().sairDaRenomeacao
+          if (sairDaRenomeacao && !(await sairDaRenomeacao())) {
+            window.api.app.cancelClose()
+            return
+          }
+          const sairDoCodigo = useAppStore.getState().sairDoCodigo
+          if (sairDoCodigo && !(await sairDoCodigo())) {
+            window.api.app.cancelClose()
+            return
+          }
           const sairDoMemo = useAppStore.getState().sairDoMemo
           if (sairDoMemo && !(await sairDoMemo())) {
             window.api.app.cancelClose()

@@ -1,4 +1,4 @@
-import { type JSX, useEffect, useMemo, useRef, useState } from 'react'
+import { type JSX, type RefObject, useEffect, useMemo, useRef, useState } from 'react'
 import { casaBusca } from '@shared/busca'
 import {
   ChevronDown,
@@ -55,6 +55,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { CodeDialog, type CodeDialogValue } from './CodeDialog'
+import { RenameDialog } from './RenameDialog'
 import { SimplePromptDialog } from './SimplePromptDialog'
 import { CollectionMembersDialog } from './CollectionMembersDialog'
 import { CategoryCodesDialog } from './CategoryCodesDialog'
@@ -63,9 +64,11 @@ import { SearchButton, SearchField } from './SearchField'
 import { randomColor } from '@/lib/utils'
 import { mensagemDeErro } from '@/lib/erros'
 import type { CodeWithCount, Collection } from '@shared/types'
+import { useScrollMemory, type ScrollPosition } from '@/lib/useScrollMemory'
 
 interface Props {
   onViewCode: (code: CodeWithCount | null) => void
+  scrollPosition?: RefObject<ScrollPosition>
 }
 
 interface SelectModifiers {
@@ -114,7 +117,7 @@ type DropIntent =
 // `same` é o noop: mesma posição de inserção, mas em tom neutro.
 type DropKind = 'up' | 'down' | 'group' | 'inside' | 'root' | 'same'
 
-export function CodesPanel({ onViewCode }: Props): JSX.Element {
+export function CodesPanel({ onViewCode, scrollPosition }: Props): JSX.Element {
   const [memoTarget, setMemoTarget] = useState<MemoTarget | null>(null)
   const codes = useAppStore((s) => s.codes)
   const collections = useAppStore((s) => s.collections)
@@ -144,6 +147,8 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
   const tree = useMemo(() => filterLibraryTree(fullTree, termo), [fullTree, termo])
   const filtrando = termo.trim() !== ''
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const collapsibleKeys = useMemo(() => collectCollapsibleKeys(fullTree), [fullTree])
+  const hasCollapsed = [...collapsibleKeys].some((key) => collapsed.has(key))
   // Durante a busca tudo fica aberto: um código que casa dentro de uma categoria
   // recolhida ficaria escondido. Ao limpar, o recolhido de antes volta.
   const recolhido = (key: string): boolean => !filtrando && collapsed.has(key)
@@ -197,6 +202,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
   } | null>(null)
   const dragIdsRef = useRef<number[] | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  useScrollMemory(scrollRef, scrollPosition)
   // Espelhos para os handlers globais de pointer (instalados uma vez) lerem o
   // estado atual sem recriá-los a cada render.
   const codesRef = useRef(codes)
@@ -220,7 +226,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
   }
 
   const expandAll = (): void => setCollapsed(new Set())
-  const collapseAll = (): void => setCollapsed(collectCollapsibleKeys(fullTree))
+  const collapseAll = (): void => setCollapsed(new Set(collapsibleKeys))
 
   const toggleSelect = (id: number): void => {
     anchorRef.current = id
@@ -725,22 +731,13 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
   const handleSubmit = async (value: CodeDialogValue): Promise<boolean> => {
     if (!dialogState) return false
     try {
-      if (dialogState.mode === 'edit' && dialogState.code) {
-        await updateCode({
-          id: dialogState.code.id,
-          name: value.name,
-          color: value.color,
-          description: value.description || null
-        })
-      } else {
-        await createCode({
-          name: value.name,
-          color: value.color,
-          description: value.description || null,
-          parentId:
-            dialogState.mode === 'child' ? dialogState.code?.id ?? null : null
-        })
-      }
+      await createCode({
+        name: value.name,
+        color: value.color,
+        description: value.description || null,
+        parentId:
+          dialogState.mode === 'child' ? dialogState.code?.id ?? null : null
+      })
       return true
     } catch (err) {
       flashNotice(mensagemDeErro(err, 'Não foi possível salvar o código.'))
@@ -754,10 +751,8 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
       await createCollection({ name })
     } else if (prompt.kind === 'newCategory') {
       await createCode({ name, color: randomColor(), isCategory: true })
-    } else if (prompt.kind === 'renameCollection') {
-      await updateCollection({ id: prompt.collection.id, name })
-    } else if (prompt.kind === 'renameCategory') {
-      await updateCode({ id: prompt.code.id, name })
+    } else if (prompt.kind === 'renameCollection' || prompt.kind === 'renameCategory') {
+      return
     } else if (prompt.kind === 'groupFromCode') {
       const category = await createGroup({
         name,
@@ -1141,6 +1136,19 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
           >
             <Plus className="h-4 w-4" /> Novo código
           </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="shrink-0 px-2"
+            aria-label={hasCollapsed ? 'Expandir tudo' : 'Recolher tudo'}
+            title={filtrando
+              ? 'Durante a busca, as categorias e os grupos ficam expandidos'
+              : `${hasCollapsed ? 'Expandir' : 'Recolher'} todas as categorias e grupos`}
+            disabled={filtrando || collapsibleKeys.size === 0}
+            onClick={hasCollapsed ? expandAll : collapseAll}
+          >
+            {hasCollapsed ? <UnfoldVertical className="h-4 w-4" /> : <FoldVertical className="h-4 w-4" />}
+          </Button>
           <SearchButton
             active={buscaAberta}
             title="Buscar código, categoria ou grupo"
@@ -1353,6 +1361,7 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
       {memoTarget && <MemoDialog target={memoTarget} onClose={() => setMemoTarget(null)} />}
       <CodeDialog
         open={dialogState !== null}
+        existing={dialogState?.mode === 'edit' ? dialogState.code : null}
         onOpenChange={(o) => !o && setDialogState(null)}
         title={
           dialogState?.mode === 'edit'
@@ -1373,7 +1382,19 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
         onSubmit={handleSubmit}
       />
 
-      <SimplePromptDialog
+      {prompt?.kind === 'renameCollection' || prompt?.kind === 'renameCategory' ? (
+        <RenameDialog
+          key={`${prompt.kind}:${prompt.kind === 'renameCollection' ? prompt.collection.id : prompt.code.id}`}
+          title={prompt.kind === 'renameCollection' ? 'Renomear grupo' : 'Renomear categoria'}
+          label={prompt.kind === 'renameCollection' ? 'Nome do grupo' : 'Nome da categoria'}
+          initialName={prompt.kind === 'renameCollection' ? prompt.collection.name : prompt.code.name}
+          write={async (name, historyGroup) => {
+            if (prompt.kind === 'renameCollection') await updateCollection({ id: prompt.collection.id, name, historyGroup })
+            else await updateCode({ id: prompt.code.id, name, historyGroup })
+          }}
+          onClose={() => setPrompt(null)}
+        />
+      ) : <SimplePromptDialog
         open={prompt !== null}
         onOpenChange={(o) => !o && setPrompt(null)}
         title={
@@ -1381,30 +1402,20 @@ export function CodesPanel({ onViewCode }: Props): JSX.Element {
             ? 'Novo grupo'
             : prompt?.kind === 'newCategory'
             ? 'Nova categoria'
-            : prompt?.kind === 'renameCollection'
-            ? 'Renomear grupo'
-            : prompt?.kind === 'renameCategory'
-              ? 'Renomear categoria'
-              : prompt?.kind === 'groupFromCode'
+            : prompt?.kind === 'groupFromCode'
               ? `Nova categoria com "${prompt.code.name}"`
               : prompt?.kind === 'collectionFromGroup'
                 ? `Novo grupo com "${prompt.code.name}"`
                 : ''
         }
         label={
-          prompt?.kind === 'newCategory' || prompt?.kind === 'groupFromCode' || prompt?.kind === 'renameCategory'
+          prompt?.kind === 'newCategory' || prompt?.kind === 'groupFromCode'
             ? 'Nome da categoria'
             : 'Nome do grupo'
         }
-        initialValue={
-          prompt?.kind === 'renameCollection'
-            ? prompt.collection.name
-            : prompt?.kind === 'renameCategory'
-              ? prompt.code.name
-              : ''
-        }
+        initialValue=""
         onSubmit={handlePrompt}
-      />
+      />}
 
       <SimplePromptDialog
         open={groupPrompt !== null}

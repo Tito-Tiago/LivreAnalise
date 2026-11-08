@@ -92,7 +92,7 @@ export function VersionsDialog({ open, onOpenChange }: Props): JSX.Element {
             onChange={(e) => setLabel(e.target.value)}
           />
           <Button onClick={() => void handleCreate()} disabled={working}>
-            <History className="h-4 w-4" /> Salvar
+            <History className="h-4 w-4" /> Criar checkpoint
           </Button>
         </div>
         {error && (

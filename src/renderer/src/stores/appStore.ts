@@ -47,7 +47,7 @@ interface AppState {
   refreshDocuments: () => Promise<void>
   importDocuments: () => Promise<void>
   selectDocument: (id: number) => Promise<boolean>
-  renameDocument: (id: number, name: string) => Promise<void>
+  renameDocument: (id: number, name: string, historyGroup?: string) => Promise<void>
   updateDocumentText: (id: number, text: string) => Promise<void>
   deleteDocument: (id: number) => Promise<void>
 
@@ -123,6 +123,10 @@ interface AppState {
   responderSaidaDoTexto: (ok: boolean) => void
   sairDoMemo: (() => Promise<boolean>) | null
   registerSairDoMemo: (fn: (() => Promise<boolean>) | null) => void
+  sairDoCodigo: (() => Promise<boolean>) | null
+  registerSairDoCodigo: (fn: (() => Promise<boolean>) | null) => void
+  sairDaRenomeacao: (() => Promise<boolean>) | null
+  registerSairDaRenomeacao: (fn: (() => Promise<boolean>) | null) => void
 }
 
 async function refreshAfterHistory(
@@ -237,6 +241,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   createProject: async () => {
+    if (get().sairDaRenomeacao && !(await get().sairDaRenomeacao!())) return
+    if (get().sairDoCodigo && !(await get().sairDoCodigo!())) return
     if (get().sairDoMemo && !(await get().sairDoMemo!())) return
     if (!(await get().podeSairDoTexto())) return
     await get().notesFlush?.()
@@ -259,6 +265,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   // "Abrir projeto" aceita .liva e .qdpx (#41). O .qdpx vira um projeto novo e
   // volta com o relatório da importação.
   openProject: async () => {
+    if (get().sairDaRenomeacao && !(await get().sairDaRenomeacao!())) return
+    if (get().sairDoCodigo && !(await get().sairDoCodigo!())) return
     if (get().sairDoMemo && !(await get().sairDoMemo!())) return
     if (!(await get().podeSairDoTexto())) return
     await get().notesFlush?.()
@@ -283,6 +291,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   openRecent: async (path) => {
+    if (get().sairDaRenomeacao && !(await get().sairDaRenomeacao!())) return
+    if (get().sairDoCodigo && !(await get().sairDoCodigo!())) return
     if (get().sairDoMemo && !(await get().sairDoMemo!())) return
     if (!(await get().podeSairDoTexto())) return
     await get().notesFlush?.()
@@ -294,6 +304,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   closeProject: async () => {
+    if (get().sairDaRenomeacao && !(await get().sairDaRenomeacao!())) return
+    if (get().sairDoCodigo && !(await get().sairDoCodigo!())) return
     if (get().sairDoMemo && !(await get().sairDoMemo!())) return
     if (!(await get().podeSairDoTexto())) return
     await get().notesFlush?.()
@@ -327,6 +339,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   selectDocument: async (id) => {
+    if (get().sairDaRenomeacao && !(await get().sairDaRenomeacao!())) return false
     // O salvar do próprio texto chama selectDocument no mesmo documento para
     // recarregar; só trocar de documento é sair da edição.
     if (get().currentDocument?.id !== id && !(await get().podeSairDoTexto())) return false
@@ -346,8 +359,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     return true
   },
 
-  renameDocument: async (id, name) => {
-    await window.api.documents.rename(id, name)
+  renameDocument: async (id, name, historyGroup) => {
+    await window.api.documents.rename(id, name, historyGroup)
     await get().refreshDocuments()
     const current = get().currentDocument
     if (current && current.id === id) {
@@ -369,6 +382,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   deleteDocument: async (id) => {
+    if (get().sairDaRenomeacao && !(await get().sairDaRenomeacao!())) return
     // Descobre a nota aberta no editor ANTES de mexer no estado: depois do
     // refresh ela sumiu da lista e nao da mais para saber de que documento era.
     const editorId = get().editorNoteId
@@ -451,6 +465,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   undo: async () => {
+    if (get().sairDaRenomeacao && !(await get().sairDaRenomeacao!())) return null
+    if (get().sairDoCodigo && !(await get().sairDoCodigo!())) return null
     if (get().sairDoMemo && !(await get().sairDoMemo!())) return null
     if (!(await get().podeSairDoTexto())) return null
     await get().notesFlush?.()
@@ -460,6 +476,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   redo: async () => {
+    if (get().sairDaRenomeacao && !(await get().sairDaRenomeacao!())) return null
+    if (get().sairDoCodigo && !(await get().sairDoCodigo!())) return null
     if (get().sairDoMemo && !(await get().sairDoMemo!())) return null
     if (!(await get().podeSairDoTexto())) return null
     await get().notesFlush?.()
@@ -477,6 +495,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   createVersion: async (label) => {
+    if (get().sairDaRenomeacao && !(await get().sairDaRenomeacao!())) return
+    if (get().sairDoCodigo && !(await get().sairDoCodigo!())) return
     if (!(await get().podeSairDoTexto())) return
     await get().notesFlush?.()
     await window.api.versions.create(label)
@@ -489,6 +509,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   restoreVersion: async (id) => {
+    if (get().sairDaRenomeacao && !(await get().sairDaRenomeacao!())) return
+    if (get().sairDoCodigo && !(await get().sairDoCodigo!())) return
     if (get().sairDoMemo && !(await get().sairDoMemo!())) return
     if (!(await get().podeSairDoTexto())) return
     await get().notesFlush?.()
@@ -657,6 +679,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   registerNotesFlush: (fn) => set({ notesFlush: fn }),
   sairDoMemo: null,
   registerSairDoMemo: (fn) => set({ sairDoMemo: fn }),
+  sairDoCodigo: null,
+  registerSairDoCodigo: (fn) => set({ sairDoCodigo: fn }),
+  sairDaRenomeacao: null,
+  registerSairDaRenomeacao: (fn) => set({ sairDaRenomeacao: fn }),
   notasSujo: false,
   setNotasSujo: (sujo) => {
     if (get().notasSujo === sujo) return

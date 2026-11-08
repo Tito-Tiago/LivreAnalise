@@ -106,7 +106,7 @@ export function CollectionMembersDialog({ collection, onOpenChange }: Props): JS
           )}
         </div>
         <DialogFooter>
-          <Button onClick={() => onOpenChange(false)}>Concluir</Button>
+          <Button onClick={() => onOpenChange(false)}>Fechar</Button>
         </DialogFooter>
         </>}
       </DialogContent>

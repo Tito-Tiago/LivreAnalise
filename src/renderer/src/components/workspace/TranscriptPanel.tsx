@@ -1,4 +1,4 @@
-import { type JSX, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, type JSX, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronUp, FileText, MessageSquare, Pencil, Save, Search, Trash2, X } from 'lucide-react'
 import { useAppStore } from '@/stores/appStore'
 import { useZoomStore } from '@/stores/zoomStore'
@@ -35,6 +35,14 @@ import { ExcerptPopover } from './ExcerptPopover'
 import { excerptAction } from '@/lib/excerptAction'
 import { mensagemDeErro } from '@/lib/erros'
 import { CodeDialog, type CodeDialogValue } from './CodeDialog'
+import { MemoDialog, type MemoTarget } from './MemoDialog'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger
+} from '@/components/ui/context-menu'
 import type { CodeWithCount } from '@shared/types'
 import { useAsyncAction } from '@/lib/useAsyncAction'
 import { applyTextareaChange } from '@/lib/textareaChange'
@@ -139,6 +147,7 @@ export function TranscriptPanel(): JSX.Element {
   const documentNotes = useAppStore((s) => s.documentNotes)
   const projectNotes = useAppStore((s) => s.projectNotes)
   const editorNoteId = useAppStore((s) => s.editorNoteId)
+  const notesPanelOpen = useAppStore((s) => s.notesPanelOpen)
   const updateNote = useAppStore((s) => s.updateNote)
   const navigateNoteId = useAppStore((s) => s.navigateNoteId)
   const clearNavigateNote = useAppStore((s) => s.clearNavigateNote)
@@ -156,6 +165,7 @@ export function TranscriptPanel(): JSX.Element {
   const backdropContentRef = useRef<HTMLDivElement>(null)
   const viewportRef = useRef<TranscriptViewport | null>(null)
   const historyViewportRef = useRef<TranscriptViewport | null>(null)
+  const notesViewportRef = useRef<TranscriptViewport | null>(null)
   const [pending, setPending] = useState<PendingSelection | null>(null)
   const [excerptMenu, setExcerptMenu] = useState<{
     x: number; y: number; codingIds: number[]; noteIds: number[]
@@ -170,6 +180,8 @@ export function TranscriptPanel(): JSX.Element {
     end: number
     initial: Partial<CodeDialogValue>
   } | null>(null)
+  const [editingCode, setEditingCode] = useState<CodeWithCount | null>(null)
+  const [memoTarget, setMemoTarget] = useState<MemoTarget | null>(null)
   const [bars, setBars] = useState<Bar[]>([])
   const [noteMarks, setNoteMarks] = useState<Array<{ ids: number[]; top: number }>>([])
   const [multiBands, setMultiBands] = useState<
@@ -754,6 +766,38 @@ export function TranscriptPanel(): JSX.Element {
     setMultiBands(collectBands(textEl, containerTop - scrollTop, containerLeft - scrollLeft, hitSegments))
   }, [codings, codeMap, codingMap, codeBandH, draftSegments, editing, hitSegments, hoverCoding, lineRows, noteAnchors])
 
+  // A notificação do store precede a mudança de largura no DOM. Guardar só
+  // scrollTop não basta: a abertura das notas muda as quebras de linha.
+  useLayoutEffect(() => {
+    notesViewportRef.current = null
+    return useAppStore.subscribe((state, previous) => {
+      if (state.notesPanelOpen === previous.notesPanelOpen) return
+      if (state.currentDocument?.id !== previous.currentDocument?.id) return
+      const container = editing ? backdropRef.current : scrollRef.current
+      const content = editing ? backdropContentRef.current : textRef.current
+      if (!container || !content) return
+      const note = state.documentNotes.find((n) => n.id === state.editorNoteId)
+      notesViewportRef.current = captureTranscriptViewport(
+        container,
+        content,
+        !editing && note?.anchorStatus === 'attached' ? note.startPos ?? undefined : undefined
+      )
+    })
+  }, [editing, currentDocument?.id])
+
+  useLayoutEffect(() => {
+    const viewport = notesViewportRef.current
+    notesViewportRef.current = null
+    const container = editing ? backdropRef.current : scrollRef.current
+    const content = editing ? backdropContentRef.current : textRef.current
+    if (!viewport || !container || !content) return
+    restoreTranscriptViewport(container, content, viewport)
+    if (editing && textareaRef.current) {
+      textareaRef.current.scrollTop = container.scrollTop
+      syncScroll()
+    }
+  }, [notesPanelOpen, editing])
+
   useLayoutEffect(() => {
     const viewport = viewportRef.current
     if (!viewport) return
@@ -993,6 +1037,27 @@ export function TranscriptPanel(): JSX.Element {
     return () => registerTextoAcoes(null)
   }, [registerTextoAcoes])
 
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented || event.isComposing || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return
+      const key = event.key.toLowerCase()
+      if (key !== 'e' && key !== 's') return
+      if (!currentDocument || (key === 's' && !editing)) return
+      // Não disputa os atalhos de notas, buscas, renomeações ou diálogos.
+      if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return
+      const target = event.target instanceof HTMLElement ? event.target : null
+      if (target !== textareaRef.current &&
+          (target?.isContentEditable || target?.closest('input, textarea, select, [contenteditable="true"]'))) return
+      event.preventDefault()
+      if (event.repeat || saving) return
+      if (key === 's') void saveEditing().catch(() => undefined)
+      else if (editing) void cancelEditing().catch(() => undefined)
+      else startEditing()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [currentDocument, editing, saving, startEditing, cancelEditing, saveEditing])
+
   // Trocar de documento encerra a edição: o rascunho é do documento anterior, e
   // o salvar gravaria esse texto no documento novo.
   useEffect(() => {
@@ -1026,10 +1091,10 @@ export function TranscriptPanel(): JSX.Element {
           </span>
           {editing ? (
             <>
-              <Button size="sm" variant="ghost" onClick={() => void cancelEditing()} disabled={saving}>
+              <Button size="sm" variant="ghost" title="Sair da edição (Ctrl+E)" onClick={() => void cancelEditing()} disabled={saving}>
                 <X className="h-4 w-4" /> Cancelar
               </Button>
-              <Button size="sm" onClick={() => void saveEditing().catch(() => undefined)} disabled={saving}>
+              <Button size="sm" title="Salvar texto (Ctrl+S)" onClick={() => void saveEditing().catch(() => undefined)} disabled={saving}>
                 <Save className="h-4 w-4" /> Salvar texto
               </Button>
             </>
@@ -1052,7 +1117,7 @@ export function TranscriptPanel(): JSX.Element {
               >
                 <Search className="h-4 w-4" />
               </Button>
-              <Button size="sm" variant="outline" onClick={startEditing}>
+              <Button size="sm" variant="outline" title="Editar texto (Ctrl+E)" onClick={startEditing}>
                 <Pencil className="h-4 w-4" /> Editar texto
               </Button>
             </>
@@ -1127,9 +1192,20 @@ export function TranscriptPanel(): JSX.Element {
       )}
 
       {editing ? (
-        <div className="flex flex-1 flex-col overflow-hidden p-4">
+        <div className="relative min-h-0 flex-1 overflow-hidden">
+          {/* Mantém a geometria da leitura: trilha de notas (28px), números
+              (48px), margem direita (24px), separador (6px) e faixa de códigos.
+              Ocultar as etiquetas não deve alargar nem deslocar o texto. */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-y-0 right-0 border-l bg-muted/30"
+            style={{ width: effectiveLaneWidth }}
+          />
           {(codings.length > 0 || documentNotes.length > 0) && (
-            <p className="mb-2 text-xs text-amber-500">
+            <p
+              className="pointer-events-none absolute right-0 top-0 z-10 p-3 text-xs text-amber-500"
+              style={{ width: effectiveLaneWidth }}
+            >
               Os trechos citados aparecem realçados. Editar o texto reposiciona
               citações e notas automaticamente. Quando a edição desfaz o trecho,
               ele é reencontrado se ainda existir no documento; se não, a citação
@@ -1137,16 +1213,18 @@ export function TranscriptPanel(): JSX.Element {
             </p>
           )}
           <div
-            className="relative flex-1 overflow-hidden rounded-md border bg-background"
+            className="absolute inset-0 overflow-hidden"
             onMouseMove={handleEditHover}
             onMouseLeave={() => setEditTip(null)}
           >
             <div
               ref={backdropRef}
               aria-hidden="true"
-              className="pointer-events-none absolute inset-0 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] p-3 font-mono"
+              className="pointer-events-none absolute inset-0 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] py-5 font-mono"
               style={{
-                fontSize: `calc(0.875rem * ${zoom})`,
+                paddingLeft: '4.75rem',
+                paddingRight: `calc(${effectiveLaneWidth}px + 1.875rem)`,
+                fontSize: `calc(15px * ${zoom})`,
                 lineHeight: `calc(1.75rem * ${zoom})`,
                 fontFamily: 'var(--transcript-font)'
               }}
@@ -1196,18 +1274,14 @@ export function TranscriptPanel(): JSX.Element {
                 setDraft(next)
               }}
               aria-label={`Texto de ${currentDocument.name}`}
-              onKeyDown={(e) => {
-                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
-                  e.preventDefault()
-                  if (!saving) void saveEditing().catch(() => undefined)
-                }
-              }}
               onScroll={syncScroll}
               spellCheck={false}
-              className="absolute inset-0 h-full w-full resize-none overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] bg-transparent p-3 font-mono text-transparent caret-foreground outline-none"
+              className="absolute inset-0 h-full w-full resize-none overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] bg-transparent py-5 font-mono text-transparent caret-foreground outline-none"
               style={{
                 color: 'transparent',
-                fontSize: `calc(0.875rem * ${zoom})`,
+                paddingLeft: '4.75rem',
+                paddingRight: `calc(${effectiveLaneWidth}px + 1.875rem)`,
+                fontSize: `calc(15px * ${zoom})`,
                 lineHeight: `calc(1.75rem * ${zoom})`,
                 fontFamily: 'var(--transcript-font)'
               }}
@@ -1396,17 +1470,45 @@ export function TranscriptPanel(): JSX.Element {
                             : null
                           const showStartHandle = selCoding != null && segStart === selCoding.startPos
                           const showEndHandle = selCoding != null && segEnd === selCoding.endPos
+                          // A âncora não ocupa espaço; a haste marca o limite e a
+                          // bolinha fica abaixo das letras, na entrelinha.
+                          // Selecionar uma citação não deve deslocar nem requebrar o texto.
                           const handleStyle: React.CSSProperties = {
                             display: 'inline-block',
+                            width: 0,
+                            height: 0,
+                            verticalAlign: 'baseline',
+                            position: 'relative',
+                            zIndex: 10,
+                          }
+                          const handleHitStyle: React.CSSProperties = {
+                            position: 'absolute',
+                            left: -10,
+                            top: '-0.85em',
+                            width: 20,
+                            height: '1.6em',
+                            cursor: 'col-resize',
+                            userSelect: 'none',
+                          }
+                          const handleStemStyle: React.CSSProperties = {
+                            position: 'absolute',
+                            left: 9,
+                            top: 0,
+                            width: 2,
+                            height: '1.15em',
+                            borderRadius: 1,
+                            backgroundColor: topColor,
+                            pointerEvents: 'none',
+                          }
+                          const handleDotStyle: React.CSSProperties = {
+                            position: 'absolute',
+                            left: 6,
+                            top: '1.15em',
                             width: 8,
                             height: 8,
                             borderRadius: '50%',
                             backgroundColor: topColor,
-                            cursor: 'col-resize',
-                            verticalAlign: 'middle',
-                            flexShrink: 0,
-                            position: 'relative',
-                            zIndex: 10,
+                            pointerEvents: 'none',
                           }
                           return (
                             <span
@@ -1459,6 +1561,7 @@ export function TranscriptPanel(): JSX.Element {
                               {showStartHandle && (
                                 <span
                                   role="slider"
+                                  className="group outline-none"
                                   tabIndex={0}
                                   aria-label="Início da citação"
                                   aria-valuemin={0}
@@ -1470,18 +1573,24 @@ export function TranscriptPanel(): JSX.Element {
                                     const pos = Math.max(0, Math.min(selCoding!.endPos - 1, selCoding!.startPos + (e.key === 'ArrowRight' ? 1 : -1)))
                                     void run(() => updateCoding(selCoding!.id, pos, selCoding!.endPos))
                                   }}
-                                  style={{ ...handleStyle, marginRight: 2 }}
+                                  style={handleStyle}
                                   onMouseDown={(e) => {
                                     e.preventDefault()
                                     e.stopPropagation()
                                     setDragging({ codingId: selCoding!.id, end: 'start' })
                                   }}
-                                />
+                                >
+                                  <span aria-hidden="true" style={handleHitStyle}>
+                                    <span style={handleStemStyle} />
+                                    <span className="group-focus-visible:ring-2 group-focus-visible:ring-foreground group-focus-visible:ring-offset-2 group-focus-visible:ring-offset-background" style={handleDotStyle} />
+                                  </span>
+                                </span>
                               )}
                               {segText}
                               {showEndHandle && (
                                 <span
                                   role="slider"
+                                  className="group outline-none"
                                   tabIndex={0}
                                   aria-label="Fim da citação"
                                   aria-valuemin={selCoding!.startPos + 1}
@@ -1493,13 +1602,18 @@ export function TranscriptPanel(): JSX.Element {
                                     const pos = Math.max(selCoding!.startPos + 1, Math.min(text.length, selCoding!.endPos + (e.key === 'ArrowRight' ? 1 : -1)))
                                     void run(() => updateCoding(selCoding!.id, selCoding!.startPos, pos))
                                   }}
-                                  style={{ ...handleStyle, marginLeft: 2 }}
+                                  style={handleStyle}
                                   onMouseDown={(e) => {
                                     e.preventDefault()
                                     e.stopPropagation()
                                     setDragging({ codingId: selCoding!.id, end: 'end' })
                                   }}
-                                />
+                                >
+                                  <span aria-hidden="true" style={handleHitStyle}>
+                                    <span style={handleStemStyle} />
+                                    <span className="group-focus-visible:ring-2 group-focus-visible:ring-foreground group-focus-visible:ring-offset-2 group-focus-visible:ring-offset-background" style={handleDotStyle} />
+                                  </span>
+                                </span>
                               )}
                             </span>
                           )
@@ -1556,56 +1670,93 @@ export function TranscriptPanel(): JSX.Element {
           />
           <div
             className="relative shrink-0 border-l bg-muted/30"
-             style={{ width: effectiveLaneWidth }}
-           >
+            style={{ width: effectiveLaneWidth }}
+          >
             {bars.map((bar) => (
-              <div
+              <ContextMenu
                 key={bar.codingId}
-                 onMouseEnter={() => setHoverCoding({ codingIds: bar.codingIds, color: bar.color })}
-                 onMouseLeave={() => setHoverCoding(null)}
-                 title={bar.codingIds.length > 1 ? 'Clique para escolher um código' : undefined}
-                 className="group absolute flex cursor-pointer items-center gap-1 rounded px-1.5 text-xs"
-                 style={{
-                   height: barHeight,
-                  top: bar.top,
-                   left: BAR_LANE_PAD / 2 + bar.column * barSlot,
-                  width: Math.max(BAR_MIN_WIDTH, barSlot * bar.columnSpan - BAR_GAP),
-                  backgroundColor: bar.color,
-                  color: contrastText(bar.color),
-                   outline: bar.codingIds.includes(selectedCodingId ?? -1) ? `2px solid ${bar.color}` : undefined,
-                  outlineOffset: 2,
+                onOpenChange={(open) => {
+                  if (!open) return
+                  setPending(null)
+                  closeExcerptMenu()
+                  setHoverCoding(null)
+                  selectionGestureRef.current = false
                 }}
-               >
-                 <button
-                   type="button"
-                   className="flex h-full min-w-0 flex-1 items-center gap-1 text-left focus-visible:outline focus-visible:outline-2"
-                   aria-label={`Selecionar citação: ${bar.name}`}
-                   onClick={(e) => {
-                     e.stopPropagation()
-                     selectionGestureRef.current = false
-                     const box = e.currentTarget.getBoundingClientRect()
-                     activateExcerpt(bar.codingIds, [], e.detail === 0 ? box.left : e.clientX, e.detail === 0 ? box.bottom : e.clientY + 8)
-                   }}
-                 >
-                  <BarName name={bar.name} />
-                  {bar.codingIds.length > 1 && <span className="shrink-0">+{bar.codingIds.length - 1}</span>}
-                 </button>
-                  {(bar.codingIds.length === 1 || bar.codingIds.includes(selectedCodingId ?? -1)) && <button
-                   className="ml-auto shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                   aria-label={`Remover citação: ${bar.name}`}
-                   title={bar.codingIds.length === 1 ? 'Remover citação' : 'Remover citação selecionada'}
-                  onClick={(e) => {
-                    // sem isto o clique sobe para a etiqueta e marca como
-                    // selecionada a citação que acabou de ser removida
-                    e.stopPropagation()
-                      void run(() => removeCoding(bar.codingIds.includes(selectedCodingId ?? -1) ? selectedCodingId! : bar.codingId))
-                  }}
-                >
-                  <Trash2 className="h-3 w-3" />
-                 </button>}
-              </div>
+              >
+                <ContextMenuTrigger asChild>
+                  <div
+                    onMouseEnter={() => setHoverCoding({ codingIds: bar.codingIds, color: bar.color })}
+                    onMouseLeave={() => setHoverCoding(null)}
+                    title={bar.codingIds.length > 1 ? 'Clique para escolher um código' : undefined}
+                    className="group absolute flex cursor-pointer items-center gap-1 rounded px-1.5 text-xs"
+                    style={{
+                      height: barHeight,
+                      top: bar.top,
+                      left: BAR_LANE_PAD / 2 + bar.column * barSlot,
+                      width: Math.max(BAR_MIN_WIDTH, barSlot * bar.columnSpan - BAR_GAP),
+                      backgroundColor: bar.color,
+                      color: contrastText(bar.color),
+                      outline: bar.codingIds.includes(selectedCodingId ?? -1) ? `2px solid ${bar.color}` : undefined,
+                      outlineOffset: 2,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="flex h-full min-w-0 flex-1 items-center gap-1 text-left focus-visible:outline focus-visible:outline-2"
+                      aria-label={`Selecionar citação: ${bar.name}`}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        selectionGestureRef.current = false
+                        const box = e.currentTarget.getBoundingClientRect()
+                        activateExcerpt(bar.codingIds, [], e.detail === 0 ? box.left : e.clientX, e.detail === 0 ? box.bottom : e.clientY + 8)
+                      }}
+                    >
+                      <BarName name={bar.name} />
+                      {bar.codingIds.length > 1 && <span className="shrink-0">+{bar.codingIds.length - 1}</span>}
+                    </button>
+                    {(bar.codingIds.length === 1 || bar.codingIds.includes(selectedCodingId ?? -1)) && <button
+                      className="ml-auto shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                      aria-label={`Remover citação: ${bar.name}`}
+                      title={bar.codingIds.length === 1 ? 'Remover citação' : 'Remover citação selecionada'}
+                      onClick={(e) => {
+                        // sem isto o clique sobe para a etiqueta e marca como
+                        // selecionada a citação que acabou de ser removida
+                        e.stopPropagation()
+                        void run(() => removeCoding(bar.codingIds.includes(selectedCodingId ?? -1) ? selectedCodingId! : bar.codingId))
+                      }}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>}
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent aria-label="Ações do código" className="max-h-[var(--radix-context-menu-content-available-height)] overflow-y-auto">
+                  {bar.codingIds.map((codingId, index) => {
+                    const coding = codingMap.get(codingId)
+                    const code = coding ? codeMap.get(coding.codeId) : undefined
+                    if (!code) return null
+                    return (
+                      <Fragment key={codingId}>
+                        {index > 0 && <ContextMenuSeparator />}
+                        <div role="group" aria-label={code.name}>
+                          <p className="max-w-72 truncate px-2 py-1 text-xs font-medium text-muted-foreground" title={code.name}>{code.name}</p>
+                          <ContextMenuItem onSelect={() => setEditingCode(code)}>
+                            <Pencil className="h-4 w-4" /> Editar código
+                          </ContextMenuItem>
+                          <ContextMenuItem onSelect={() => setMemoTarget({ id: code.id, name: code.name, kind: 'código', memo: code.memo ?? '' })}>
+                            <MessageSquare className="h-4 w-4" /> Abrir memo
+                          </ContextMenuItem>
+                          <ContextMenuSeparator />
+                          <ContextMenuItem className="text-destructive focus:text-destructive" onSelect={() => void run(() => removeCoding(codingId))}>
+                            <Trash2 className="h-4 w-4" /> Remover citação
+                          </ContextMenuItem>
+                        </div>
+                      </Fragment>
+                    )
+                  })}
+                </ContextMenuContent>
+              </ContextMenu>
             ))}
-            </div>
+          </div>
           </div>
         </div>
       )}
@@ -1638,6 +1789,14 @@ export function TranscriptPanel(): JSX.Element {
         />
       )}
 
+      {memoTarget && <MemoDialog target={memoTarget} onClose={() => setMemoTarget(null)} />}
+      <CodeDialog
+        open={editingCode !== null}
+        existing={editingCode}
+        onOpenChange={(open) => !open && setEditingCode(null)}
+        title="Editar código"
+        onSubmit={async () => true}
+      />
       <CodeDialog
         open={novoCodigo !== null}
         onOpenChange={(o) => !o && setNovoCodigo(null)}

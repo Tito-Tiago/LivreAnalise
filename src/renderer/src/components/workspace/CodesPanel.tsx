@@ -1069,6 +1069,15 @@ export function CodesPanel({ onViewCode, scrollPosition }: Props): JSX.Element {
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent>
+            <ContextMenuItem
+              onSelect={() =>
+                isCategory
+                  ? setPrompt({ kind: 'renameCategory', code: node.code })
+                  : setDialogState({ mode: 'edit', code: node.code })
+              }
+            >
+              <Pencil className="h-4 w-4" /> {isCategory ? 'Renomear categoria' : 'Editar código'}
+            </ContextMenuItem>
             <ContextMenuItem onClick={() => setMemoTarget({ id: node.code.id, name: node.code.name, kind: isCategory ? 'categoria' : 'código', memo: node.code.memo ?? '' })}>Abrir memo</ContextMenuItem>
             <ContextMenuItem
               onClick={() => setDialogState({ mode: 'create' })}

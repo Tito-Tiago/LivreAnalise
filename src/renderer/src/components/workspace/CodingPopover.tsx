@@ -78,6 +78,7 @@ export function CodingPopover({
       return
     }
     if (e.key === 'Escape') {
+      e.preventDefault()
       onClose()
     } else if (e.key === 'Enter') {
       e.preventDefault()
@@ -139,6 +140,7 @@ export function CodingPopover({
       )}
       {showLastUsed && (
         <button
+          title={lastUsed.name}
           onClick={() => onApply(lastUsed.id)}
           className="mb-1 flex w-full items-center gap-2 rounded-sm bg-accent/50 px-2 py-1.5 text-left text-sm hover:bg-accent"
         >
@@ -154,6 +156,7 @@ export function CodingPopover({
         {listCodes.map((c) => (
           <button
             key={c.id}
+            title={c.name}
             onClick={() => onApply(c.id)}
             className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent"
           >

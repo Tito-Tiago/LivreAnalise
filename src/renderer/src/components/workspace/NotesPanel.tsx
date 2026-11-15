@@ -268,6 +268,18 @@ export function NotesPanel(): JSX.Element {
   const [erroLista, setErroLista] = useState<string | null>(null)
   const { error: navigationError, run } = useAsyncAction()
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      // Diálogos e menus sobrepostos têm prioridade sobre o painel.
+      if (document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"]')) return
+      event.preventDefault()
+      void run(toggleNotesPanel)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [run, toggleNotesPanel])
+
   const [filter, setFilter] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
   const listPosition = useRef({ top: 0, left: 0 })
@@ -329,7 +341,7 @@ export function NotesPanel(): JSX.Element {
           className="ml-auto"
           onClick={() => void run(toggleNotesPanel)}
           aria-label="Fechar painel de notas"
-          title="Fechar painel de notas"
+          title="Fechar painel de notas (Esc)"
         >
           <X className="h-4 w-4" />
         </Button>

@@ -161,6 +161,10 @@ export function TranscriptPanel(): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null)
   const textRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const readerRef = useRef<HTMLTextAreaElement>(null)
+  const readerSelectionRef = useRef({ start: 0, end: 0, direction: 'none' as 'forward' | 'backward' | 'none' })
+  const keyboardPendingRef = useRef(false)
+  const [keyboardReading, setKeyboardReading] = useState(false)
   const backdropRef = useRef<HTMLDivElement>(null)
   const backdropContentRef = useRef<HTMLDivElement>(null)
   const viewportRef = useRef<TranscriptViewport | null>(null)
@@ -360,6 +364,61 @@ export function TranscriptPanel(): JSX.Element {
   }, [codes])
 
   const text = currentDocument?.plainText ?? ''
+  // Textarea normaliza CRLF/CR para LF, mas as posições persistidas são UTF-16
+  // no texto original. Não usar diretamente selectionStart como offset do banco.
+  const readerText = useMemo(() => text.replace(/\r\n?/g, '\n'), [text])
+  const originalOffset = (offset: number): number => {
+    let original = 0
+    let normalized = 0
+    while (original < text.length && normalized < offset) {
+      if (text[original] === '\r' && text[original + 1] === '\n') original++
+      original++
+      normalized++
+    }
+    return original
+  }
+  const restoreReader = (collapse = false): void => {
+    if (!keyboardPendingRef.current) return
+    keyboardPendingRef.current = false
+    requestAnimationFrame(() => {
+      const reader = readerRef.current
+      if (!reader) return
+      const selection = readerSelectionRef.current
+      const start = collapse ? selection.end : selection.start
+      reader.focus({ preventScroll: true })
+      reader.setSelectionRange(start, selection.end, collapse ? 'none' : selection.direction)
+    })
+  }
+  const openReaderSelection = (field: HTMLTextAreaElement, x: number, y: number): void => {
+    if (field.selectionStart === field.selectionEnd) return
+    readerSelectionRef.current = { start: field.selectionStart, end: field.selectionEnd, direction: field.selectionDirection ?? 'none' }
+    keyboardPendingRef.current = true
+    setPending({ start: originalOffset(field.selectionStart), end: originalOffset(field.selectionEnd), x, y })
+  }
+
+  useEffect(() => {
+    setKeyboardReading(false)
+    keyboardPendingRef.current = false
+    readerSelectionRef.current = { start: 0, end: 0, direction: 'none' }
+  }, [currentDocument?.id])
+
+  useLayoutEffect(() => {
+    if (!keyboardReading || !readerRef.current) return
+    const reader = readerRef.current
+    // Chromium não pinta o cursor em textarea readOnly. Bloquear beforeinput
+    // mantém o cursor e a seleção nativos sem permitir nenhuma edição, inclusive IME.
+    const preventEdit = (event: Event): void => event.preventDefault()
+    reader.addEventListener('beforeinput', preventEdit)
+    reader.addEventListener('drop', preventEdit)
+    reader.scrollTop = scrollRef.current?.scrollTop ?? 0
+    reader.focus({ preventScroll: true })
+    const selection = readerSelectionRef.current
+    reader.setSelectionRange(selection.start, selection.end, selection.direction)
+    return () => {
+      reader.removeEventListener('beforeinput', preventEdit)
+      reader.removeEventListener('drop', preventEdit)
+    }
+  }, [keyboardReading])
   const codingMap = useMemo(() => new Map(codings.map((c) => [c.id, c])), [codings])
   const noteById = useMemo(() => new Map(documentNotes.map((n) => [n.id, n])), [documentNotes])
 
@@ -857,6 +916,7 @@ export function TranscriptPanel(): JSX.Element {
     const end = Math.max(a, b)
     if (end <= start) return
     selectionGestureRef.current = true
+    keyboardPendingRef.current = false
     setExcerptMenu(null)
     const rect = range.getBoundingClientRect()
     setPending({ start, end, x: rect.left, y: rect.bottom + 6 })
@@ -879,9 +939,12 @@ export function TranscriptPanel(): JSX.Element {
 
   const applyCode = async (codeId: number): Promise<void> => {
     if (!pending) return
-    await addCoding(codeId, pending.start, pending.end)
-    setPending(null)
-    window.getSelection()?.removeAllRanges()
+    await run(async () => {
+      await addCoding(codeId, pending.start, pending.end)
+      setPending(null)
+      window.getSelection()?.removeAllRanges()
+      restoreReader(true)
+    })
   }
 
   const startCreateCode = (name: string): void => {
@@ -904,6 +967,7 @@ export function TranscriptPanel(): JSX.Element {
       })
       await addCoding(code.id, novoCodigo.start, novoCodigo.end)
       window.getSelection()?.removeAllRanges()
+      restoreReader(true)
       return true
     } catch (err) {
       alert(mensagemDeErro(err, 'Não foi possível criar o código.'))
@@ -922,6 +986,7 @@ export function TranscriptPanel(): JSX.Element {
     setPending(null)
     window.getSelection()?.removeAllRanges()
     openNoteEditor(note.id)
+    keyboardPendingRef.current = false
   }
 
   // Nota de trecho desvinculada so tinha saida por desfazer ou apagar: 'attached'
@@ -953,6 +1018,7 @@ export function TranscriptPanel(): JSX.Element {
       viewportRef.current = captureTranscriptViewport(scrollRef.current, textRef.current)
     }
     setPending(null)
+    setKeyboardReading(false)
     setDraft(text)
     setSaveError(null)
     setEditing(true)
@@ -1046,7 +1112,7 @@ export function TranscriptPanel(): JSX.Element {
       // Não disputa os atalhos de notas, buscas, renomeações ou diálogos.
       if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return
       const target = event.target instanceof HTMLElement ? event.target : null
-      if (target !== textareaRef.current &&
+      if (target !== textareaRef.current && target !== readerRef.current &&
           (target?.isContentEditable || target?.closest('input, textarea, select, [contenteditable="true"]'))) return
       event.preventDefault()
       if (event.repeat || saving) return
@@ -1119,6 +1185,12 @@ export function TranscriptPanel(): JSX.Element {
               </Button>
               <Button size="sm" variant="outline" title="Editar texto (Ctrl+E)" onClick={startEditing}>
                 <Pencil className="h-4 w-4" /> Editar texto
+              </Button>
+              <Button size="sm" variant="ghost" data-focus-document data-area-default title="Navegar pelo texto sem editar" onClick={() => {
+                if (readerRef.current) readerRef.current.focus({ preventScroll: true })
+                else setKeyboardReading(true)
+              }}>
+                Navegar pelo texto
               </Button>
             </>
           )}
@@ -1297,10 +1369,16 @@ export function TranscriptPanel(): JSX.Element {
           </div>
         </div>
       ) : (
+        <div className="relative min-h-0 flex-1">
         <div
           ref={scrollRef}
-          className="relative flex-1 overflow-auto"
+          className="relative h-full overflow-auto"
           style={dragging ? { cursor: 'col-resize', userSelect: 'none' } : undefined}
+          onScroll={(event) => {
+            if (readerRef.current && readerRef.current.scrollTop !== event.currentTarget.scrollTop) {
+              readerRef.current.scrollTop = event.currentTarget.scrollTop
+            }
+          }}
           onClick={() => setSelectedCodingId(null)}
         >
           <div className="relative flex">
@@ -1759,13 +1837,67 @@ export function TranscriptPanel(): JSX.Element {
           </div>
           </div>
         </div>
+        {keyboardReading && (
+          <textarea
+            ref={readerRef}
+            value={readerText}
+            onChange={() => {}}
+            aria-readonly="true"
+            aria-label={`Navegação somente leitura: ${currentDocument.name}`}
+            aria-description="Use as setas para navegar, Shift e setas para selecionar, Ctrl+Enter para codificar e Esc para sair da navegação."
+            onSelect={(event) => {
+              const field = event.currentTarget
+              readerSelectionRef.current = {
+                start: field.selectionStart,
+                end: field.selectionEnd,
+                direction: field.selectionDirection ?? 'none'
+              }
+            }}
+            onScroll={(event) => {
+              if (scrollRef.current) scrollRef.current.scrollTop = event.currentTarget.scrollTop
+            }}
+            onMouseUp={(event) => {
+              openReaderSelection(event.currentTarget, event.clientX, event.clientY + 8)
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape' && !pending) {
+                event.preventDefault()
+                event.stopPropagation()
+                setKeyboardReading(false)
+                requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('[data-focus-document]')?.focus())
+              } else if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                const field = event.currentTarget
+                if (field.selectionStart === field.selectionEnd) return
+                event.preventDefault()
+                const rect = field.getBoundingClientRect()
+                openReaderSelection(field, rect.left + 8, rect.top + 40)
+              }
+            }}
+            className="transcript-reader absolute inset-y-0 h-full resize-none overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] bg-transparent py-5 font-mono text-transparent caret-primary outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+            style={{
+              left: '4.75rem',
+              right: `calc(${effectiveLaneWidth + (scrollRef.current ? scrollRef.current.offsetWidth - scrollRef.current.clientWidth : 0)}px + 1.875rem)`,
+              width: `calc(100% - ${effectiveLaneWidth + (scrollRef.current ? scrollRef.current.offsetWidth - scrollRef.current.clientWidth : 0)}px - 6.625rem)`,
+              color: 'transparent',
+              fontSize: `calc(15px * ${zoom})`,
+              lineHeight: `calc(1.75rem * ${zoom})`,
+              fontFamily: 'var(--transcript-font)'
+            }}
+          />
+        )}
+        {keyboardReading && <span className="pointer-events-none absolute bottom-2 right-2 rounded border bg-background px-2 py-1 text-xs shadow">Modo de análise — texto protegido · Ctrl+Enter para codificar · Esc para sair</span>}
+        </div>
       )}
 
       {pending && (
         <CodingPopover
           x={pending.x}
           y={pending.y}
-          onClose={() => setPending(null)}
+          onClose={(reason) => {
+            setPending(null)
+            if (reason === 'escape') restoreReader()
+            else keyboardPendingRef.current = false
+          }}
           onApply={applyCode}
           onCreate={startCreateCode}
           selectedText={text.slice(pending.start, pending.end)}
@@ -1799,7 +1931,7 @@ export function TranscriptPanel(): JSX.Element {
       />
       <CodeDialog
         open={novoCodigo !== null}
-        onOpenChange={(o) => !o && setNovoCodigo(null)}
+        onOpenChange={(o) => { if (!o) { setNovoCodigo(null); restoreReader() } }}
         title="Novo código"
         initial={novoCodigo?.initial}
         onSubmit={submitNovoCodigo}

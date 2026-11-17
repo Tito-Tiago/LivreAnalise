@@ -23,6 +23,7 @@ export function Sidebar({ onViewCode }: Props): JSX.Element {
   const [tab, setTab] = useState<Tab>('documents')
   const documentsScroll = useRef({ top: 0, left: 0 })
   const codesScroll = useRef({ top: 0, left: 0 })
+  const tabButtons = useRef(new Map<Tab, HTMLButtonElement>())
   const [width, setWidth] = useState(() => {
     const stored = Number(localStorage.getItem(WIDTH_KEY))
     return stored >= MIN_WIDTH && stored <= MAX_WIDTH ? stored : DEFAULT_WIDTH
@@ -48,6 +49,13 @@ export function Sidebar({ onViewCode }: Props): JSX.Element {
     { id: 'documents', label: 'Documentos', icon: <FileText className="h-4 w-4" /> },
     { id: 'codes', label: 'Códigos', icon: <Tags className="h-4 w-4" /> }
   ]
+  const changeTab = async (next: Tab): Promise<boolean> => {
+    if (tab === next) return true
+    const leave = useAppStore.getState().sairDaRenomeacao
+    if (leave && !(await leave())) return false
+    setTab(next)
+    return true
+  }
 
   const onMouseMove = useCallback((e: MouseEvent) => {
     const next = Math.min(maxWidth, Math.max(MIN_WIDTH, e.clientX))
@@ -81,11 +89,18 @@ export function Sidebar({ onViewCode }: Props): JSX.Element {
           {tabs.map((t) => (
             <button
               key={t.id}
-              onClick={async () => {
-                if (tab === t.id) return
-                const leave = useAppStore.getState().sairDaRenomeacao
-                if (leave && !(await leave())) return
-                setTab(t.id)
+              ref={(button) => {
+                if (button) tabButtons.current.set(t.id, button)
+                else tabButtons.current.delete(t.id)
+              }}
+              onClick={() => void changeTab(t.id)}
+              onKeyDown={(event) => {
+                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+                event.preventDefault()
+                const next = t.id === 'documents' ? 'codes' : 'documents'
+                void changeTab(next).then((changed) => {
+                  if (changed) tabButtons.current.get(next)?.focus()
+                })
               }}
                aria-pressed={tab === t.id}
               className={cn(

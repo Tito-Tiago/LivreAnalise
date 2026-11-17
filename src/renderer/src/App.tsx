@@ -33,7 +33,8 @@ function App(): JSX.Element {
     const onKey = (e: KeyboardEvent): void => {
       const el = e.target as HTMLElement | null
       const tag = el?.tagName
-      const editable = el?.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA'
+      const readOnly = (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && el.readOnly
+      const editable = el?.isContentEditable || ((tag === 'INPUT' || tag === 'TEXTAREA') && !readOnly)
       if (!(e.ctrlKey || e.metaKey)) return
       const s = useZoomStore.getState()
       // O zoom vale em qualquer lugar: ele não compete com a digitação, e

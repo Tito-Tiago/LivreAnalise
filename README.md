@@ -67,6 +67,16 @@ destacadas na cor do código, com etiquetas na margem direita alinhadas ao iníc
 trecho. Codificações do mesmo código que se sobrepõem são mescladas automaticamente, e a
 extensão de uma citação pode ser ajustada arrastando as extremidades.
 
+Também é possível codificar sem mouse:
+
+1. Use `Ctrl+P` (`Cmd+P` no macOS) para procurar e abrir um documento.
+2. No documento, acione **Navegar pelo texto**. O modo de análise é somente leitura;
+   use as setas para navegar e `Shift` com as setas para selecionar.
+3. Pressione `Ctrl+Enter` (`Cmd+Enter` no macOS) para abrir o menu do trecho. Digite
+   para filtrar, percorra as opções com `↑` e `↓` e confirme com `Enter`.
+4. `Esc` fecha o menu ou sai da navegação. `F6` e `Shift+F6` percorrem as áreas
+   da janela; na barra lateral, as setas alternam entre Documentos e Códigos.
+
 ### Código, categoria e grupo
 
 A hierarquia tem exatamente três níveis:

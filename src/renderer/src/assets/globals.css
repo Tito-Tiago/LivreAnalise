@@ -115,6 +115,16 @@ body {
   background: hsl(var(--primary) / 0.45);
 }
 
+/* A barra pertence ao texto sob a camada; uma segunda barra alteraria a largura
+   das linhas do campo e desalinharia o cursor dos destaques. */
+.transcript-reader {
+  scrollbar-width: none;
+}
+
+.transcript-reader::-webkit-scrollbar {
+  display: none;
+}
+
 .transcript .pending-selection {
   background: hsl(var(--primary) / 0.45);
   border-radius: 2px;

@@ -68,7 +68,7 @@ it('mantém o trecho recém-anotado na mesma altura, não apenas a primeira linh
   window.getSelection()!.removeAllRanges()
   window.getSelection()!.addRange(range)
   fireEvent.mouseUp(span)
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Adicionar nota ao trecho' })) })
+  await act(async () => { fireEvent.click(screen.getByRole('option', { name: 'Adicionar nota ao trecho' })) })
   expect(useAppStore.getState().editorNoteId).toBe(note.id)
   expect(scroller.scrollTop).toBe(847)
   await act(async () => { fireEvent.keyDown(document.body, { key: 'Escape' }) })

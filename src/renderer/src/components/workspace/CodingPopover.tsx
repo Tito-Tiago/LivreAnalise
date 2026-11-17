@@ -7,7 +7,7 @@ import { applicableCodes } from '@shared/codeTree'
 interface Props {
   x: number
   y: number
-  onClose: () => void
+  onClose: (reason: 'escape' | 'outside') => void
   onApply: (codeId: number) => void
   // Criar código abre o diálogo de configuração (cor, descrição) com o nome já
   // digitado; quem chama aplica ao trecho depois de salvo.
@@ -31,13 +31,15 @@ export function CodingPopover({
   const allCodes = useAppStore((s) => s.codes)
   const lastUsedCodeId = useAppStore((s) => s.lastUsedCodeId)
   const [filter, setFilter] = useState('')
+  const [active, setActive] = useState(0)
   const ref = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([])
 
   useEffect(() => {
     inputRef.current?.focus()
     const onDocMouseDown = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose('outside')
     }
     document.addEventListener('mousedown', onDocMouseDown)
     return () => document.removeEventListener('mousedown', onDocMouseDown)
@@ -57,11 +59,18 @@ export function CodingPopover({
   const exactMatch = allCodes.some(
     (c) => mesmoTermo(c.name, filter)
   )
+  const options: Array<{ key: string; label: string; action: () => void; color?: string; last?: boolean }> = [
+    ...(showLastUsed && lastUsed ? [{ key: `code-${lastUsed.id}`, label: lastUsed.name, color: lastUsed.color, last: true, action: () => onApply(lastUsed.id) }] : []),
+    ...listCodes.map((c) => ({ key: `code-${c.id}`, label: c.name, color: c.color, action: () => onApply(c.id) })),
+    ...(filter.trim() && !exactMatch ? [{ key: 'create', label: `Criar código "${filter.trim()}"`, action: () => onCreate(filter.trim()) }] : []),
+    ...(onAddNote ? [{ key: 'note', label: 'Adicionar nota ao trecho', action: onAddNote }] : []),
+    ...(onReattachNote ? [{ key: 'reattach', label: 'Religar a nota aberta a este trecho', action: onReattachNote }] : [])
+  ]
+  const activeIndex = Math.min(active, Math.max(0, options.length - 1))
 
-  const handleCreate = (): void => {
-    const name = filter.trim()
-    if (name) onCreate(name)
-  }
+  useEffect(() => {
+    optionRefs.current[activeIndex]?.scrollIntoView?.({ block: 'nearest' })
+  }, [activeIndex, filter])
 
   const handleKeyDown = (e: React.KeyboardEvent): void => {
     // O popover abre com o foco no campo de busca, então o Ctrl+C ia para o
@@ -79,11 +88,13 @@ export function CodingPopover({
     }
     if (e.key === 'Escape') {
       e.preventDefault()
-      onClose()
-    } else if (e.key === 'Enter') {
+      onClose('escape')
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault()
-      if (filtered.length > 0) onApply(filtered[0].id)
-      else if (filter.trim() && !exactMatch) handleCreate()
+      if (options.length) setActive((activeIndex + (e.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length)
+    } else if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+      e.preventDefault()
+      options[activeIndex]?.action()
     }
   }
 
@@ -94,6 +105,8 @@ export function CodingPopover({
   return (
     <div
       ref={ref}
+      role="dialog"
+      aria-label="Codificar trecho"
       className="fixed z-50 w-72 rounded-md border bg-popover p-2 shadow-lg"
       style={{ left, top }}
       onCopy={(e) => {
@@ -115,67 +128,37 @@ export function CodingPopover({
       <input
         ref={inputRef}
         value={filter}
-        onChange={(e) => setFilter(e.target.value)}
+        onChange={(e) => { setFilter(e.target.value); setActive(0) }}
         onKeyDown={handleKeyDown}
         placeholder="Buscar ou criar código..."
+        aria-label="Buscar ou criar código"
+        role="combobox"
+        aria-expanded="true"
+        aria-controls="coding-options"
+        aria-activedescendant={options.length ? `coding-option-${activeIndex}` : undefined}
         className="mb-2 h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       />
-      {onAddNote && (
-        <button
-          onClick={onAddNote}
-          className="mb-1 flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <StickyNote className="h-4 w-4" />
-          Adicionar nota ao trecho
-        </button>
-      )}
-      {onReattachNote && (
-        <button
-          onClick={onReattachNote}
-          className="mb-1 flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-primary hover:bg-accent"
-        >
-          <Link2 className="h-4 w-4" />
-          Religar a nota aberta a este trecho
-        </button>
-      )}
-      {showLastUsed && (
-        <button
-          title={lastUsed.name}
-          onClick={() => onApply(lastUsed.id)}
-          className="mb-1 flex w-full items-center gap-2 rounded-sm bg-accent/50 px-2 py-1.5 text-left text-sm hover:bg-accent"
-        >
-          <span
-            className="h-3 w-3 rounded-full"
-            style={{ backgroundColor: lastUsed.color }}
-          />
-          <span className="truncate">{lastUsed.name}</span>
-          <span className="ml-auto text-xs text-muted-foreground">último</span>
-        </button>
-      )}
-      <div className="max-h-56 overflow-auto">
-        {listCodes.map((c) => (
+      <div id="coding-options" role="listbox" aria-label="Ações para o trecho" className="max-h-56 overflow-auto">
+        {options.map((option, index) => (
           <button
-            key={c.id}
-            title={c.name}
-            onClick={() => onApply(c.id)}
-            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent"
+            key={option.key}
+            ref={(el) => { optionRefs.current[index] = el }}
+            id={`coding-option-${index}`}
+            role="option"
+            aria-selected={index === activeIndex}
+            type="button"
+            title={option.label}
+            onMouseMove={() => setActive(index)}
+            onClick={option.action}
+            className={`flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent ${index === activeIndex ? 'bg-accent ring-1 ring-inset ring-primary' : ''}`}
           >
-            <span
-              className="h-3 w-3 shrink-0 rounded-full"
-              style={{ backgroundColor: c.color }}
-            />
-            <span className="truncate">{c.name}</span>
+            {option.color ? <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: option.color }} /> :
+              option.key === 'note' ? <StickyNote className="h-4 w-4" /> :
+                option.key === 'reattach' ? <Link2 className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+            <span className="truncate">{option.label}</span>
+            {option.last && <span className="ml-auto text-xs text-muted-foreground">último</span>}
           </button>
         ))}
-        {filter.trim() && !exactMatch && (
-          <button
-            onClick={handleCreate}
-            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-primary hover:bg-accent"
-          >
-            <Plus className="h-4 w-4" />
-            Criar código "{filter.trim()}"
-          </button>
-        )}
         {listCodes.length === 0 && !filter.trim() && !showLastUsed && (
           <p className="px-2 py-3 text-center text-xs text-muted-foreground">
             Digite para buscar ou criar um código

@@ -77,6 +77,17 @@ Também é possível codificar sem mouse:
 4. `Esc` fecha o menu ou sai da navegação. `F6` e `Shift+F6` percorrem as áreas
    da janela; na barra lateral, as setas alternam entre Documentos e Códigos.
 
+Na árvore de códigos, use as setas para percorrer, expandir e recolher itens.
+`Espaço` alterna a seleção, `Shift+↑/↓` seleciona um intervalo, `Enter` abre os
+detalhes e `Shift+F10` abre as ações do item.
+
+`Ctrl+Shift+N` cria uma nota para o trecho selecionado ou para o documento,
+`Ctrl+Shift+O` abre ou fecha o painel de notas e `Ctrl+Shift+M` abre o memo do
+item em foco na árvore. No macOS, use `Cmd` no lugar de `Ctrl`.
+
+Abra a **Paleta de comandos** com `Ctrl+K` (`Cmd+K` no macOS) para buscar ações,
+ou consulte a **Ajuda de atalhos** com `F1` ou pelo botão na barra superior.
+
 ### Código, categoria e grupo
 
 A hierarquia tem exatamente três níveis:

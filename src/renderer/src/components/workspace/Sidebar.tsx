@@ -5,6 +5,7 @@ import { CodesPanel } from './CodesPanel'
 import { cn } from '@/lib/utils'
 import type { CodeWithCount } from '@shared/types'
 import { useAppStore } from '@/stores/appStore'
+import { useWorkspaceActions } from '@/lib/workspaceActions'
 
 type Tab = 'documents' | 'codes'
 
@@ -21,6 +22,7 @@ interface Props {
 
 export function Sidebar({ onViewCode }: Props): JSX.Element {
   const [tab, setTab] = useState<Tab>('documents')
+  const [createRequested, requestCreate] = useState(false)
   const documentsScroll = useRef({ top: 0, left: 0 })
   const codesScroll = useRef({ top: 0, left: 0 })
   const tabButtons = useRef(new Map<Tab, HTMLButtonElement>())
@@ -56,6 +58,9 @@ export function Sidebar({ onViewCode }: Props): JSX.Element {
     setTab(next)
     return true
   }
+  useWorkspaceActions({
+    newCode: { run: async () => { if (await changeTab('codes')) requestCreate(true) } }
+  })
 
   const onMouseMove = useCallback((e: MouseEvent) => {
     const next = Math.min(maxWidth, Math.max(MIN_WIDTH, e.clientX))
@@ -94,6 +99,8 @@ export function Sidebar({ onViewCode }: Props): JSX.Element {
                 else tabButtons.current.delete(t.id)
               }}
               onClick={() => void changeTab(t.id)}
+              data-focus-key={`sidebar-${t.id}`}
+              data-area-default={t.id === tab ? true : undefined}
               onKeyDown={(event) => {
                 if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
                 event.preventDefault()
@@ -117,7 +124,8 @@ export function Sidebar({ onViewCode }: Props): JSX.Element {
         </div>
         <div className="min-h-0 flex-1">
           {tab === 'documents' && <DocumentsPanel scrollPosition={documentsScroll} />}
-          {tab === 'codes' && <CodesPanel onViewCode={onViewCode} scrollPosition={codesScroll} />}
+          {tab === 'codes' && <CodesPanel onViewCode={onViewCode} scrollPosition={codesScroll}
+            createRequested={createRequested} onCreateRequested={() => requestCreate(false)} />}
         </div>
       </div>
       <div

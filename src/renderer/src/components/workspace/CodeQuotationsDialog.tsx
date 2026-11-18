@@ -13,13 +13,15 @@ import { casaBusca } from '@shared/busca'
 import { SearchButton, SearchField } from './SearchField'
 import type { CodeWithCount, CodingWithCode } from '@shared/types'
 import { MemoEditor } from './MemoDialog'
+import { restoreFocus, type FocusAnchor } from '@/lib/keyboard'
 
 interface Props {
   code: CodeWithCount | null
   onOpenChange: (open: boolean) => void
+  returnFocus?: FocusAnchor | null
 }
 
-export function CodeQuotationsDialog({ code, onOpenChange }: Props): JSX.Element {
+export function CodeQuotationsDialog({ code, onOpenChange, returnFocus }: Props): JSX.Element {
   const [quotes, setQuotes] = useState<CodingWithCode[]>([])
   const [somenteDocumento, setSomenteDocumento] = useState(false)
   const [atual, setAtual] = useState(0)
@@ -103,7 +105,8 @@ export function CodeQuotationsDialog({ code, onOpenChange }: Props): JSX.Element
   }
 
   const onKeyDown = (e: React.KeyboardEvent): void => {
-    if (memoOpen) return
+    if (memoOpen || e.nativeEvent.isComposing || e.defaultPrevented) return
+    if (e.key === 'Enter' && e.target instanceof HTMLButtonElement) return
     if (e.key === 'ArrowDown') {
       e.preventDefault()
       andar(1)
@@ -126,9 +129,15 @@ export function CodeQuotationsDialog({ code, onOpenChange }: Props): JSX.Element
       <DialogContent
         className={memoOpen ? 'flex h-[80vh] max-h-[90vh] w-[90vw] max-w-4xl flex-col' : 'max-w-2xl'}
         onKeyDown={onKeyDown}
+        onCloseAutoFocus={(event) => {
+          if (returnFocus) { event.preventDefault(); restoreFocus(returnFocus) }
+        }}
         onEscapeKeyDown={(e) => {
           // Esc com a busca aberta fecha só a busca, não o diálogo inteiro.
-          if (!memoOpen && buscaAberta) {
+          if (memoOpen) {
+            e.preventDefault()
+            void useAppStore.getState().sairDoMemo?.()
+          } else if (buscaAberta) {
             e.preventDefault()
             fecharBusca()
           }

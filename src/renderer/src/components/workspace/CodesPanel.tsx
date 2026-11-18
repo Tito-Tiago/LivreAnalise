@@ -1,4 +1,4 @@
-import { type JSX, type RefObject, useEffect, useMemo, useRef, useState } from 'react'
+import { type JSX, type KeyboardEvent, type RefObject, useEffect, useMemo, useRef, useState } from 'react'
 import { casaBusca } from '@shared/busca'
 import {
   ChevronDown,
@@ -65,10 +65,22 @@ import { randomColor } from '@/lib/utils'
 import { mensagemDeErro } from '@/lib/erros'
 import type { CodeWithCount, Collection } from '@shared/types'
 import { useScrollMemory, type ScrollPosition } from '@/lib/useScrollMemory'
+import { captureFocus, hasKeyboardLayer, matchesCommand, type FocusAnchor } from '@/lib/keyboard'
+import { useWorkspaceActions } from '@/lib/workspaceActions'
 
 interface Props {
   onViewCode: (code: CodeWithCount | null) => void
   scrollPosition?: RefObject<ScrollPosition>
+  createRequested?: boolean
+  onCreateRequested?: () => void
+}
+
+interface VisibleTreeRow {
+  key: string
+  parent: string | null
+  hasChildren: boolean
+  code?: CodeWithCount
+  collection?: Collection
 }
 
 interface SelectModifiers {
@@ -117,8 +129,11 @@ type DropIntent =
 // `same` é o noop: mesma posição de inserção, mas em tom neutro.
 type DropKind = 'up' | 'down' | 'group' | 'inside' | 'root' | 'same'
 
-export function CodesPanel({ onViewCode, scrollPosition }: Props): JSX.Element {
+export function CodesPanel({ onViewCode, scrollPosition, createRequested, onCreateRequested }: Props): JSX.Element {
   const [memoTarget, setMemoTarget] = useState<MemoTarget | null>(null)
+  const memoOrigin = useRef<FocusAnchor | null>(null)
+  const codeDialogOrigin = useRef<FocusAnchor | null>(null)
+  const detailsOrigin = useRef<FocusAnchor | null>(null)
   const codes = useAppStore((s) => s.codes)
   const collections = useAppStore((s) => s.collections)
   const collectionMembers = useAppStore((s) => s.collectionMembers)
@@ -170,6 +185,11 @@ export function CodesPanel({ onViewCode, scrollPosition }: Props): JSX.Element {
   )
   const [codesCategory, setCodesCategory] = useState<CodeWithCount | null>(null)
   const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [treeFocus, setTreeFocus] = useState<string | null>(null)
+  const [actionsKey, setActionsKey] = useState<string | null>(null)
+  const keyboardMenuKey = useRef<string | null>(null)
+  const rangeKey = useRef<string | null>(null)
+  const treeRows = useRef(new Map<string, HTMLLIElement>())
   const [moveOpen, setMoveOpen] = useState(false)
   const [moveFilter, setMoveFilter] = useState('')
   const [moveError, setMoveError] = useState<string | null>(null)
@@ -240,24 +260,28 @@ export function CodesPanel({ onViewCode, scrollPosition }: Props): JSX.Element {
 
   // Ordem visível dos códigos (respeita coleções e grupos recolhidos), usada
   // pelo Shift+clique para selecionar intervalos como no explorador de arquivos.
-  const visibleIds = useMemo(() => {
-    const ids: number[] = []
-    const walk = (node: CodeNode<CodeWithCount>, path: string): void => {
-      ids.push(node.code.id)
+  const visibleRows = useMemo(() => {
+    const rows: VisibleTreeRow[] = []
+    const walk = (node: CodeNode<CodeWithCount>, path: string, parent: string | null): void => {
       const key = `${path}/${node.code.id}`
+      rows.push({ key, parent, hasChildren: node.children.length > 0, code: node.code })
       if (node.children.length > 0 && !recolhido(key)) {
-        for (const child of node.children) walk(child, key)
+        for (const child of node.children) walk(child, key, key)
       }
     }
     for (const col of tree.collections) {
       const key = `col-${col.collection.id}`
+      rows.push({ key, parent: null, hasChildren: col.children.length > 0, collection: col.collection })
       if (recolhido(key)) continue
-      for (const child of col.children) walk(child, key)
+      for (const child of col.children) walk(child, key, key)
     }
-    for (const node of tree.loose) walk(node, 'loose')
-    return ids
+    for (const node of tree.loose) walk(node, 'loose', null)
+    return rows
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tree, collapsed, filtrando])
+  const visibleIds = useMemo(() => visibleRows.flatMap(({ code }) => code ? [code.id] : []), [visibleRows])
+  const visibleByKey = useMemo(() => new Map(visibleRows.map((row) => [row.key, row])), [visibleRows])
+  const activeRow = treeFocus && visibleByKey.has(treeFocus) ? treeFocus : visibleRows[0]?.key
 
   const selectRange = (id: number): void => {
     const anchor = anchorRef.current
@@ -302,17 +326,146 @@ export function CodesPanel({ onViewCode, scrollPosition }: Props): JSX.Element {
     setTimeout(() => setNotice(null), 2600)
   }
 
-  // Esc limpa a seleção sem mexer no resto.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
+  const focusRow = (key: string): void => {
+    const row = treeRows.current.get(key)
+    row?.focus({ preventScroll: true })
+    row?.firstElementChild?.scrollIntoView?.({ block: 'nearest' })
+  }
+
+  const handleTreeKey = (event: KeyboardEvent<HTMLLIElement>, key: string): void => {
+    if (event.target !== event.currentTarget || event.defaultPrevented || event.nativeEvent.isComposing || hasKeyboardLayer()) return
+    const row = visibleByKey.get(key)
+    if (!row) return
+    const index = visibleRows.indexOf(row)
+    const { key: pressed, shiftKey, altKey, ctrlKey, metaKey } = event
+    if (altKey || ctrlKey || metaKey) return
+    if ((pressed === 'F10' && shiftKey) || pressed === 'ContextMenu') {
+      event.preventDefault()
+      keyboardMenuKey.current = key
+      setActionsKey(key)
+      return
+    }
+    let destination: VisibleTreeRow | undefined
+    switch (pressed) {
+      case 'ArrowUp':
+      case 'ArrowDown':
+        destination = visibleRows[index + (pressed === 'ArrowDown' ? 1 : -1)]
+        if (shiftKey && destination) {
+          const anchor = rangeKey.current ?? key
+          rangeKey.current = anchor
+          const from = visibleRows.findIndex((item) => item.key === anchor)
+          const to = visibleRows.indexOf(destination)
+          const base = from < 0 ? index : from
+          setSelected(new Set(visibleRows.slice(Math.min(base, to), Math.max(base, to) + 1)
+            .flatMap(({ code }) => code ? [code.id] : [])))
+        }
+        break
+      case 'ArrowLeft':
+        if (row.hasChildren && !recolhido(key) && !filtrando) toggle(key)
+        else if (row.parent) destination = visibleByKey.get(row.parent)
+        break
+      case 'ArrowRight':
+        if (row.hasChildren && recolhido(key)) toggle(key)
+        else if (visibleRows[index + 1]?.parent === key) destination = visibleRows[index + 1]
+        break
+      case 'Home':
+        destination = visibleRows[0]
+        break
+      case 'End':
+        destination = visibleRows.at(-1)
+        break
+      case ' ':
+        if (row.code && !event.repeat) {
+          toggleSelect(row.code.id)
+          rangeKey.current = key
+        }
+        break
+      case 'Enter':
+        if (!event.repeat) {
+          detailsOrigin.current = captureFocus(event.currentTarget)
+          if (row.code) applySelect({ ctrlKey: false, metaKey: false, shiftKey: false }, row.code)
+          else if (row.collection) setMembersCollection(row.collection)
+        }
+        break
+      case 'Escape':
+        if (!selected.size) return
         setSelected(new Set())
         anchorRef.current = null
+        break
+      default:
+        return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    if (pressed !== ' ' && !(shiftKey && (pressed === 'ArrowUp' || pressed === 'ArrowDown'))) rangeKey.current = null
+    if (destination) focusRow(destination.key)
+  }
+
+  const rowProps = (key: string, label: string, hasChildren: boolean, isSelected?: boolean) => ({
+    ref: (element: HTMLLIElement | null) => {
+      if (element) treeRows.current.set(key, element)
+      else treeRows.current.delete(key)
+    },
+    role: 'treeitem',
+    'aria-label': label,
+    'aria-expanded': hasChildren ? !recolhido(key) : undefined,
+    'aria-selected': isSelected,
+    'data-tree-key': key,
+    'data-focus-key': `tree-${key}`,
+    tabIndex: activeRow === key ? 0 : -1,
+    onFocus: (event: React.FocusEvent<HTMLLIElement>) => {
+      if (event.target === event.currentTarget) setTreeFocus(key)
+    },
+    onKeyDown: (event: KeyboardEvent<HTMLLIElement>) => handleTreeKey(event, key),
+    className: 'outline-none [&:focus-visible>div]:ring-2 [&:focus-visible>div]:ring-inset [&:focus-visible>div]:ring-primary'
+  })
+
+  const closeTreeMenu = (event: Event, key: string): void => {
+    if (keyboardMenuKey.current !== key) return
+    keyboardMenuKey.current = null
+    event.preventDefault()
+    if (!hasKeyboardLayer()) focusRow(key)
+  }
+
+  const openMemo = (target: MemoTarget, origin: HTMLElement | null): void => {
+    memoOrigin.current = origin ? captureFocus(origin) : null
+    setMemoTarget(target)
+  }
+
+  const rowAt = (origin: HTMLElement | null): VisibleTreeRow | undefined => {
+    const key = origin?.closest<HTMLElement>('[data-tree-key]')?.dataset.treeKey
+    return key ? visibleByKey.get(key) : undefined
+  }
+  useWorkspaceActions({
+    openMemo: {
+      unavailable: (origin) => rowAt(origin) ? undefined : 'Foque um código, categoria ou grupo na árvore.',
+      run: (origin) => {
+        const row = rowAt(origin)
+        if (row?.collection) openMemo({ ...row.collection, kind: 'grupo', memo: row.collection.memo ?? '' }, origin)
+        else if (row?.code) openMemo({ ...row.code, kind: isGroup(row.code.id) ? 'categoria' : 'código', memo: row.code.memo ?? '' }, origin)
+      }
+    },
+    editCode: {
+      unavailable: (origin) => rowAt(origin) ? undefined : 'Foque um código, categoria ou grupo na árvore.',
+      run: (origin) => {
+        const row = rowAt(origin)
+        codeDialogOrigin.current = origin ? captureFocus(origin) : null
+        if (row?.collection) setPrompt({ kind: 'renameCollection', collection: row.collection })
+        else if (row?.code && isGroup(row.code.id)) setPrompt({ kind: 'renameCategory', code: row.code })
+        else if (row?.code) setDialogState({ mode: 'edit', code: row.code })
       }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  })
+
+  const openNewCode = (): void => {
+    codeDialogOrigin.current = captureFocus()
+    setDialogState({ mode: 'create' })
+  }
+  useEffect(() => {
+    if (!createRequested) return
+    openNewCode()
+    onCreateRequested?.()
+  }, [createRequested, onCreateRequested])
 
   const cancelExpandTimer = (): void => {
     if (expandTimer.current) {
@@ -877,7 +1030,7 @@ export function CodesPanel({ onViewCode, scrollPosition }: Props): JSX.Element {
     const isGroupTarget = isDropTarget && dropKind === 'group'
     const isSameSpot = isDropTarget && dropKind === 'same'
     return (
-      <li key={key}>
+      <li key={key} {...rowProps(key, node.code.name, hasChildren, isSelected)}>
         <ContextMenu>
           <ContextMenuTrigger asChild>
             <div
@@ -904,7 +1057,7 @@ export function CodesPanel({ onViewCode, scrollPosition }: Props): JSX.Element {
               <div
                 data-no-drag
                 role="button"
-                tabIndex={hasChildren ? 0 : -1}
+                tabIndex={-1}
                 aria-label={hasChildren ? 'Expandir ou recolher' : undefined}
                 aria-expanded={hasChildren ? !isCollapsed : undefined}
                 className="flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center text-muted-foreground"
@@ -931,18 +1084,7 @@ export function CodesPanel({ onViewCode, scrollPosition }: Props): JSX.Element {
                   clique aqui é resolvido no pointerup global, junto com o
                   arrasto, para o gesto nunca virar duas coisas. */}
               <div
-                role="button"
-                tabIndex={0}
                 className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    applySelect(
-                      { ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey },
-                      node.code
-                    )
-                  }
-                }}
                 title={node.code.description ?? undefined}
               >
                 {isCategory ? (
@@ -964,18 +1106,19 @@ export function CodesPanel({ onViewCode, scrollPosition }: Props): JSX.Element {
                   </span>
                 )}
               </div>
-              <DropdownMenu>
+              <DropdownMenu open={actionsKey === key} onOpenChange={(open) => setActionsKey(open ? key : null)}>
                 <DropdownMenuTrigger asChild>
                   <button
                     data-no-drag
+                    tabIndex={-1}
                     aria-label={`Ações de ${node.code.name}`}
                     className="rounded opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <MoreVertical className="h-4 w-4" />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => setMemoTarget({ id: node.code.id, name: node.code.name, kind: isCategory ? 'categoria' : 'código', memo: node.code.memo ?? '' })}>Abrir memo</DropdownMenuItem>
+                <DropdownMenuContent align="end" onCloseAutoFocus={(event) => closeTreeMenu(event, key)}>
+                  <DropdownMenuItem onClick={() => openMemo({ id: node.code.id, name: node.code.name, kind: isCategory ? 'categoria' : 'código', memo: node.code.memo ?? '' }, treeRows.current.get(key) ?? null)}>Abrir memo</DropdownMenuItem>
                   {(!isCategory || node.code.usageCount > 0) && <DropdownMenuItem onClick={() => onViewCode(node.code)}>
                     <List className="h-4 w-4" /> Ver trechos
                   </DropdownMenuItem>}
@@ -1078,9 +1221,9 @@ export function CodesPanel({ onViewCode, scrollPosition }: Props): JSX.Element {
             >
               <Pencil className="h-4 w-4" /> {isCategory ? 'Renomear categoria' : 'Editar código'}
             </ContextMenuItem>
-            <ContextMenuItem onClick={() => setMemoTarget({ id: node.code.id, name: node.code.name, kind: isCategory ? 'categoria' : 'código', memo: node.code.memo ?? '' })}>Abrir memo</ContextMenuItem>
+            <ContextMenuItem onClick={() => openMemo({ id: node.code.id, name: node.code.name, kind: isCategory ? 'categoria' : 'código', memo: node.code.memo ?? '' }, treeRows.current.get(key) ?? null)}>Abrir memo</ContextMenuItem>
             <ContextMenuItem
-              onClick={() => setDialogState({ mode: 'create' })}
+              onClick={openNewCode}
             >
               <Plus className="h-4 w-4" /> Novo código
             </ContextMenuItem>
@@ -1123,7 +1266,7 @@ export function CodesPanel({ onViewCode, scrollPosition }: Props): JSX.Element {
           </ContextMenuContent>
         </ContextMenu>
         {hasChildren && !isCollapsed && (
-          <ul>
+          <ul role="group">
             {node.children.map((c) => renderCode(c, depth + 1, key, null))}
           </ul>
         )}
@@ -1140,8 +1283,9 @@ export function CodesPanel({ onViewCode, scrollPosition }: Props): JSX.Element {
           <Button
             size="sm"
             variant="secondary"
+            data-focus-key="codes-new"
             className="min-w-0 flex-1"
-            onClick={() => setDialogState({ mode: 'create' })}
+            onClick={openNewCode}
           >
             <Plus className="h-4 w-4" /> Novo código
           </Button>
@@ -1231,16 +1375,17 @@ export function CodesPanel({ onViewCode, scrollPosition }: Props): JSX.Element {
                 documento.
               </p>
             ) : (
-              <ul>
+              <ul role="tree" aria-label="Códigos, categorias e grupos" aria-multiselectable="true">
                 {tree.collections.map((node) => {
                   const key = `col-${node.collection.id}`
                   const isCollapsed = recolhido(key)
                   return (
-                    <li key={key}>
+                    <li key={key} {...rowProps(key, node.collection.name, node.children.length > 0)}>
                       <ContextMenu>
                       <ContextMenuTrigger asChild>
                       <div data-collection-row={node.collection.id} className={`group flex items-center gap-1 rounded-md px-1 py-1 text-sm hover:bg-accent/50 ${dropCollection === node.collection.id ? `code-drop-inside ${dropKind === 'same' ? 'code-drop-same' : ''}` : ''}`}>
                         <button
+                          tabIndex={-1}
                           aria-label={`${isCollapsed ? 'Expandir' : 'Recolher'} ${node.collection.name}`}
                           aria-expanded={!isCollapsed}
                           className="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground"
@@ -1253,6 +1398,7 @@ export function CodesPanel({ onViewCode, scrollPosition }: Props): JSX.Element {
                           )}
                         </button>
                         <button
+                          tabIndex={-1}
                           className="flex min-w-0 flex-1 items-center gap-2 text-left font-medium"
                           onClick={() => setMembersCollection(node.collection)}
                         >
@@ -1262,14 +1408,14 @@ export function CodesPanel({ onViewCode, scrollPosition }: Props): JSX.Element {
                           </span>
                           {node.collection.memo && <span title="Possui memo" aria-label="Possui memo" className="text-xs text-muted-foreground">✎</span>}
                         </button>
-                        <DropdownMenu>
+                        <DropdownMenu open={actionsKey === key} onOpenChange={(open) => setActionsKey(open ? key : null)}>
                           <DropdownMenuTrigger asChild>
-                            <button aria-label={`Ações de ${node.collection.name}`} className="rounded opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring">
+                            <button tabIndex={-1} aria-label={`Ações de ${node.collection.name}`} className="rounded opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring">
                               <MoreVertical className="h-4 w-4" />
                             </button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => setMemoTarget({ id: node.collection.id, name: node.collection.name, kind: 'grupo', memo: node.collection.memo ?? '' })}>Abrir memo</DropdownMenuItem>
+                          <DropdownMenuContent align="end" onCloseAutoFocus={(event) => closeTreeMenu(event, key)}>
+                            <DropdownMenuItem onClick={() => openMemo({ id: node.collection.id, name: node.collection.name, kind: 'grupo', memo: node.collection.memo ?? '' }, treeRows.current.get(key) ?? null)}>Abrir memo</DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() =>
                                 setMembersCollection(node.collection)
@@ -1306,11 +1452,11 @@ export function CodesPanel({ onViewCode, scrollPosition }: Props): JSX.Element {
                       </div>
                       </ContextMenuTrigger>
                       <ContextMenuContent>
-                        <ContextMenuItem onClick={() => setMemoTarget({ id: node.collection.id, name: node.collection.name, kind: 'grupo', memo: node.collection.memo ?? '' })}>Abrir memo</ContextMenuItem>
+                        <ContextMenuItem onClick={() => openMemo({ id: node.collection.id, name: node.collection.name, kind: 'grupo', memo: node.collection.memo ?? '' }, treeRows.current.get(key) ?? null)}>Abrir memo</ContextMenuItem>
                       </ContextMenuContent>
                       </ContextMenu>
                       {!isCollapsed && (
-                        <ul>
+                        <ul role="group">
                           {node.children.map((c) =>
                             renderCode(c, 1, key, node.collection.id)
                           )}
@@ -1320,18 +1466,12 @@ export function CodesPanel({ onViewCode, scrollPosition }: Props): JSX.Element {
                   )
                 })}
 
-                {tree.loose.length > 0 && (
-                  <li>
-                    {tree.collections.length > 0 && (
-                      <p className="px-2 pb-1 pt-3 text-xs uppercase tracking-wide text-muted-foreground/60">
-                        Sem grupo
-                      </p>
-                    )}
-                    <ul>
-                      {tree.loose.map((c) => renderCode(c, 0, 'loose', null))}
-                    </ul>
+                {tree.loose.length > 0 && tree.collections.length > 0 && (
+                  <li role="presentation" className="px-2 pb-1 pt-3 text-xs uppercase tracking-wide text-muted-foreground/60">
+                    Sem grupo
                   </li>
                 )}
+                {tree.loose.map((c) => renderCode(c, 0, 'loose', null))}
               </ul>
             )}
           </div>
@@ -1343,7 +1483,7 @@ export function CodesPanel({ onViewCode, scrollPosition }: Props): JSX.Element {
           <ContextMenuItem onClick={() => setPrompt({ kind: 'newCategory' })}>
             <Tags className="h-4 w-4" /> Nova categoria
           </ContextMenuItem>
-          <ContextMenuItem onClick={() => setDialogState({ mode: 'create' })}>
+          <ContextMenuItem onClick={openNewCode}>
             <Plus className="h-4 w-4" /> Novo código
           </ContextMenuItem>
           <ContextMenuSeparator />
@@ -1367,7 +1507,7 @@ export function CodesPanel({ onViewCode, scrollPosition }: Props): JSX.Element {
         </div>
       )}
 
-      {memoTarget && <MemoDialog target={memoTarget} onClose={() => setMemoTarget(null)} />}
+      {memoTarget && <MemoDialog target={memoTarget} returnFocus={memoOrigin.current} onClose={() => setMemoTarget(null)} />}
       <CodeDialog
         open={dialogState !== null}
         existing={dialogState?.mode === 'edit' ? dialogState.code : null}
@@ -1388,6 +1528,7 @@ export function CodesPanel({ onViewCode, scrollPosition }: Props): JSX.Element {
               }
             : { color: randomColor() }
         }
+        returnFocus={codeDialogOrigin.current}
         onSubmit={handleSubmit}
       />
 
@@ -1397,6 +1538,7 @@ export function CodesPanel({ onViewCode, scrollPosition }: Props): JSX.Element {
           title={prompt.kind === 'renameCollection' ? 'Renomear grupo' : 'Renomear categoria'}
           label={prompt.kind === 'renameCollection' ? 'Nome do grupo' : 'Nome da categoria'}
           initialName={prompt.kind === 'renameCollection' ? prompt.collection.name : prompt.code.name}
+          returnFocus={codeDialogOrigin.current}
           write={async (name, historyGroup) => {
             if (prompt.kind === 'renameCollection') await updateCollection({ id: prompt.collection.id, name, historyGroup })
             else await updateCode({ id: prompt.code.id, name, historyGroup })
@@ -1436,7 +1578,9 @@ export function CodesPanel({ onViewCode, scrollPosition }: Props): JSX.Element {
       />
 
       <Dialog open={moveOpen} onOpenChange={setMoveOpen}>
-        <DialogContent>
+        <DialogContent onCloseAutoFocus={(event) => {
+          if (activeRow) { event.preventDefault(); focusRow(activeRow) }
+        }}>
           <DialogHeader>
             <DialogTitle>
               Mover {selected.size > 0 ? `${selected.size} código${selected.size > 1 ? 's' : ''}` : 'códigos'} para categoria…
@@ -1502,11 +1646,13 @@ export function CodesPanel({ onViewCode, scrollPosition }: Props): JSX.Element {
 
       <CollectionMembersDialog
         collection={membersCollection}
+        returnFocus={detailsOrigin.current}
         onOpenChange={(o) => !o && setMembersCollection(null)}
       />
 
       <CategoryCodesDialog
         category={codesCategory}
+        returnFocus={detailsOrigin.current}
         onOpenChange={(o) => !o && setCodesCategory(null)}
       />
     </div>

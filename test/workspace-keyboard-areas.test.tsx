@@ -5,15 +5,35 @@ import { Workspace } from '../src/renderer/src/components/workspace/Workspace'
 import { useAppStore } from '../src/renderer/src/stores/appStore'
 
 vi.mock('../src/renderer/src/components/workspace/TopBar', () => ({ TopBar: () => <button>Barra</button> }))
-vi.mock('../src/renderer/src/components/workspace/Sidebar', () => ({ Sidebar: () => <><button>Lateral</button><button>Outro lateral</button></> }))
+vi.mock('../src/renderer/src/components/workspace/Sidebar', () => ({
+  Sidebar: () => <>
+    <button>Lateral</button>
+    <button key={sidebarRevision} data-focus-key="sidebar-other">Outro lateral</button>
+  </>
+}))
 vi.mock('../src/renderer/src/components/workspace/TranscriptPanel', () => ({ TranscriptPanel: () => <button data-area-default>Documento</button> }))
 vi.mock('../src/renderer/src/components/workspace/NotesPanel', () => ({ NotesPanel: () => <button>Notas</button> }))
 vi.mock('../src/renderer/src/components/workspace/CodeQuotationsDialog', () => ({ CodeQuotationsDialog: () => null }))
 vi.mock('../src/renderer/src/components/workspace/UnsavedTextDialog', () => ({ UnsavedTextDialog: () => null }))
 
+let sidebarRevision = 0
 beforeEach(() => {
+  sidebarRevision = 0
   useAppStore.setState(useAppStore.getInitialState(), true)
   Object.defineProperty(window, 'api', { configurable: true, value: { app: { onCloseRequested: () => () => {} } } })
+})
+
+it('F6 encontra o mesmo controle pelo identificador depois de remontado', () => {
+  const { rerender } = render(<Workspace />)
+  const previous = screen.getByRole('button', { name: 'Outro lateral' })
+  previous.focus()
+  fireEvent.keyDown(window, { key: 'F6' })
+  sidebarRevision++
+  rerender(<Workspace />)
+  const replacement = screen.getByRole('button', { name: 'Outro lateral' })
+  expect(replacement).not.toBe(previous)
+  fireEvent.keyDown(window, { key: 'F6', shiftKey: true })
+  expect(document.activeElement).toBe(replacement)
 })
 afterEach(cleanup)
 

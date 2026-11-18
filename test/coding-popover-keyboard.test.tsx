@@ -43,3 +43,14 @@ it('permite criar código pelo filtro e mantém Escape disponível', async () =>
   await user.keyboard('{Escape}')
   expect(close).toHaveBeenCalledOnce()
 })
+
+it('não cria uma nota por padrão se não houver código aplicável', async () => {
+  const note = vi.fn()
+  const user = userEvent.setup()
+  useAppStore.setState({ codes: [], lastUsedCodeId: null })
+  render(<CodingPopover x={10} y={10} onClose={vi.fn()} onApply={vi.fn()} onCreate={vi.fn()} selectedText="trecho" onAddNote={note} />)
+  await user.keyboard('{Enter}')
+  expect(note).not.toHaveBeenCalled()
+  await user.keyboard('{ArrowDown}{Enter}')
+  expect(note).toHaveBeenCalledOnce()
+})

@@ -81,6 +81,7 @@ export function DocumentsPanel({ scrollPosition }: { scrollPosition?: RefObject<
             size="sm"
             variant="secondary"
             className="min-w-0 flex-1"
+            data-focus-key="documents-import"
             disabled={busy || working}
             onClick={() => void run(importDocuments)}
           >
@@ -133,6 +134,7 @@ export function DocumentsPanel({ scrollPosition }: { scrollPosition?: RefObject<
                         setRenaming(null)
                       }} />
                   </> : <button
+                     data-focus-key={`document-row-${doc.id}`}
                     ref={(button) => {
                       if (button) documentButtons.current.set(doc.id, button)
                       else documentButtons.current.delete(doc.id)
@@ -147,7 +149,7 @@ export function DocumentsPanel({ scrollPosition }: { scrollPosition?: RefObject<
                   </button>}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <button aria-label={`Ações de ${doc.name}`} className="rounded opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring">
+                       <button data-focus-key={`document-actions-${doc.id}`} aria-label={`Ações de ${doc.name}`} className="rounded opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring">
                         <MoreVertical className="h-4 w-4" />
                       </button>
                     </DropdownMenuTrigger>

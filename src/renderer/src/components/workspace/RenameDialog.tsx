@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useNameEditor } from '@/lib/useNameEditor'
+import { restoreFocus, type FocusAnchor } from '@/lib/keyboard'
 
 interface Props {
   title: string
@@ -10,14 +11,17 @@ interface Props {
   initialName: string
   write: (name: string, historyGroup: string) => Promise<void>
   onClose: () => void
+  returnFocus?: FocusAnchor | null
 }
 
-export function RenameDialog({ title, label, initialName, write, onClose }: Props): JSX.Element {
+export function RenameDialog({ title, label, initialName, write, onClose, returnFocus }: Props): JSX.Element {
   const id = useId()
   const editor = useNameEditor({ initialName, write, onClose })
   return (
     <Dialog open onOpenChange={(open) => { if (!open) void editor.leave() }}>
-      <DialogContent className="max-w-sm" onKeyDown={(e) => {
+      <DialogContent className="max-w-sm" onCloseAutoFocus={(event) => {
+        if (returnFocus) { event.preventDefault(); restoreFocus(returnFocus) }
+      }} onKeyDown={(e) => {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
           e.preventDefault()
           void editor.save().catch(() => undefined)

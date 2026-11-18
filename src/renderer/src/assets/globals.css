@@ -54,6 +54,11 @@
   border-color: hsl(var(--border));
 }
 
+:where(button, a, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
+
 /* Barras discretas que acompanham os temas claro e escuro. */
 *::-webkit-scrollbar {
   width: 12px;

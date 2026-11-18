@@ -15,6 +15,7 @@ import type { CodeWithCount } from '@shared/types'
 import { createCodeSaver, normalizeCodeDraft, type CodeDialogValue } from '@/lib/codeAutosave'
 import { mensagemDeErro } from '@/lib/erros'
 import { useAppStore } from '@/stores/appStore'
+import { restoreFocus, type FocusAnchor } from '@/lib/keyboard'
 
 export type { CodeDialogValue } from '@/lib/codeAutosave'
 
@@ -24,6 +25,7 @@ interface Props {
   title: string
   initial?: Partial<CodeDialogValue>
   existing?: CodeWithCount | null
+  returnFocus?: FocusAnchor | null
   // Devolve se deu certo: em caso de erro o dialogo fica aberto para a
   // pessoa corrigir em vez de fechar engolindo o que ela digitou.
   onSubmit: (value: CodeDialogValue) => Promise<boolean>
@@ -41,6 +43,7 @@ function CodeDialogForm({
   title,
   initial,
   existing,
+  returnFocus,
   onSubmit
 }: Props): JSX.Element {
   const id = useId()
@@ -144,7 +147,9 @@ function CodeDialogForm({
       if (!open && editing) void leave()
       else onOpenChange(open)
     }}>
-      <DialogContent onKeyDown={(e) => {
+      <DialogContent onCloseAutoFocus={(event) => {
+        if (returnFocus) { event.preventDefault(); restoreFocus(returnFocus) }
+      }} onKeyDown={(e) => {
         if (editing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
           e.preventDefault()
           void saveRef.current().catch(() => undefined)

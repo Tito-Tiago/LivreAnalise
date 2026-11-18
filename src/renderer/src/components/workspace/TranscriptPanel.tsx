@@ -46,6 +46,8 @@ import {
 import type { CodeWithCount } from '@shared/types'
 import { useAsyncAction } from '@/lib/useAsyncAction'
 import { applyTextareaChange } from '@/lib/textareaChange'
+import { captureFocus, hasKeyboardLayer, isTypingTarget, matchesCommand, restoreFocus, shortcutLabel, type FocusAnchor } from '@/lib/keyboard'
+import { useWorkspaceActions } from '@/lib/workspaceActions'
 
 interface PendingSelection {
   start: number
@@ -162,6 +164,8 @@ export function TranscriptPanel(): JSX.Element {
   const textRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const readerRef = useRef<HTMLTextAreaElement>(null)
+  const readerTriggerRef = useRef<HTMLButtonElement>(null)
+  const readerInitialized = useRef(false)
   const readerSelectionRef = useRef({ start: 0, end: 0, direction: 'none' as 'forward' | 'backward' | 'none' })
   const keyboardPendingRef = useRef(false)
   const [keyboardReading, setKeyboardReading] = useState(false)
@@ -218,6 +222,8 @@ export function TranscriptPanel(): JSX.Element {
   const [hitAtual, setHitAtual] = useState(0)
   const [buscaSeq, setBuscaSeq] = useState(0)
   const buscaInputRef = useRef<HTMLInputElement>(null)
+  const buscaTriggerRef = useRef<HTMLButtonElement>(null)
+  const buscaOrigin = useRef<FocusAnchor | null>(null)
   const [dragging, setDragging] = useState<{ codingId: number; end: 'start' | 'end' } | null>(null)
   const [dragPreviewPos, setDragPreviewPos] = useState<number | null>(null)
   const [editing, setEditing] = useState(false)
@@ -368,6 +374,7 @@ export function TranscriptPanel(): JSX.Element {
   // no texto original. Não usar diretamente selectionStart como offset do banco.
   const readerText = useMemo(() => text.replace(/\r\n?/g, '\n'), [text])
   const originalOffset = (offset: number): number => {
+    if (readerText.length === text.length) return offset
     let original = 0
     let normalized = 0
     while (original < text.length && normalized < offset) {
@@ -380,10 +387,11 @@ export function TranscriptPanel(): JSX.Element {
   const restoreReader = (collapse = false): void => {
     if (!keyboardPendingRef.current) return
     keyboardPendingRef.current = false
+    const originalReader = readerRef.current
+    const selection = readerSelectionRef.current
     requestAnimationFrame(() => {
       const reader = readerRef.current
-      if (!reader) return
-      const selection = readerSelectionRef.current
+      if (!reader || reader !== originalReader || hasKeyboardLayer()) return
       const start = collapse ? selection.end : selection.start
       reader.focus({ preventScroll: true })
       reader.setSelectionRange(start, selection.end, collapse ? 'none' : selection.direction)
@@ -393,30 +401,46 @@ export function TranscriptPanel(): JSX.Element {
     if (field.selectionStart === field.selectionEnd) return
     readerSelectionRef.current = { start: field.selectionStart, end: field.selectionEnd, direction: field.selectionDirection ?? 'none' }
     keyboardPendingRef.current = true
+    closeExcerptMenu()
     setPending({ start: originalOffset(field.selectionStart), end: originalOffset(field.selectionEnd), x, y })
   }
 
   useEffect(() => {
     setKeyboardReading(false)
+    setPending(null)
+    setNovoCodigo(null)
+    readerInitialized.current = false
     keyboardPendingRef.current = false
     readerSelectionRef.current = { start: 0, end: 0, direction: 'none' }
   }, [currentDocument?.id])
 
+  const startReader = (): void => {
+    if (readerRef.current) {
+      readerRef.current.focus({ preventScroll: true })
+      return
+    }
+    if (!readerInitialized.current && scrollRef.current && textRef.current) {
+      const { position } = captureTranscriptViewport(scrollRef.current, textRef.current)
+      const offset = readerText.length === text.length ? position : text.slice(0, position).replace(/\r\n?/g, '\n').length
+      readerSelectionRef.current = { start: offset, end: offset, direction: 'none' }
+      readerInitialized.current = true
+    }
+    setKeyboardReading(true)
+  }
+
   useLayoutEffect(() => {
     if (!keyboardReading || !readerRef.current) return
     const reader = readerRef.current
-    // Chromium não pinta o cursor em textarea readOnly. Bloquear beforeinput
-    // mantém o cursor e a seleção nativos sem permitir nenhuma edição, inclusive IME.
+    // Chromium não pinta o cursor com readOnly. O texto controlado e o
+    // beforeinput preservam o original sem perder a navegação nativa.
     const preventEdit = (event: Event): void => event.preventDefault()
     reader.addEventListener('beforeinput', preventEdit)
-    reader.addEventListener('drop', preventEdit)
     reader.scrollTop = scrollRef.current?.scrollTop ?? 0
     reader.focus({ preventScroll: true })
     const selection = readerSelectionRef.current
     reader.setSelectionRange(selection.start, selection.end, selection.direction)
     return () => {
       reader.removeEventListener('beforeinput', preventEdit)
-      reader.removeEventListener('drop', preventEdit)
     }
   }, [keyboardReading])
   const codingMap = useMemo(() => new Map(codings.map((c) => [c.id, c])), [codings])
@@ -427,6 +451,14 @@ export function TranscriptPanel(): JSX.Element {
   useEffect(() => {
     const onCopy = (e: ClipboardEvent): void => {
       const target = document.activeElement
+      if (target === readerRef.current && readerRef.current && e.clipboardData) {
+        const { selectionStart, selectionEnd } = readerRef.current
+        if (selectionStart !== selectionEnd) {
+          e.preventDefault()
+          e.clipboardData.setData('text/plain', text.slice(originalOffset(selectionStart), originalOffset(selectionEnd)))
+        }
+        return
+      }
       if (
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
@@ -447,7 +479,7 @@ export function TranscriptPanel(): JSX.Element {
     }
     document.addEventListener('copy', onCopy)
     return () => document.removeEventListener('copy', onCopy)
-  }, [text])
+  }, [text, readerText])
 
   // Âncoras de notas de trecho: sublinhado pontilhado discreto, sem ocupar
   // a margem direita (que pertence às etiquetas dos códigos).
@@ -512,8 +544,8 @@ export function TranscriptPanel(): JSX.Element {
     [text, previewCodings]
   )
   const displaySegments = useMemo(
-    () => markPendingSelection(dragging ? previewSegments : segments, pending),
-    [dragging, previewSegments, segments, pending]
+    () => markPendingSelection(dragging ? previewSegments : segments, pending ?? novoCodigo),
+    [dragging, previewSegments, segments, pending, novoCodigo]
   )
   // Divide os segmentos nas fronteiras das notas para que o sublinhado
   // cubra exatamente a seleção anotada, não o parágrafo inteiro.
@@ -570,27 +602,32 @@ export function TranscriptPanel(): JSX.Element {
     setBuscaSeq((n) => n + 1)
   }
 
-  // O listener e em `window`, entao o atalho vale com o foco em qualquer campo:
-  // Ctrl+F nao compete com a digitacao. Esc so fecha quando a busca esta aberta,
-  // para nao sequestrar o Esc de dialogo nenhum. Nao dispara no modo de edicao,
-  // onde a barra nao existe e a busca ficaria pendente sem aparecer.
+  const abrirBusca = (): void => {
+    if (!buscaAberta) buscaOrigin.current = captureFocus()
+    setBuscaAberta(true)
+    requestAnimationFrame(() => {
+      buscaInputRef.current?.focus()
+      buscaInputRef.current?.select()
+    })
+  }
+  const fecharBusca = (): void => {
+    setBuscaAberta(false)
+    setTermo('')
+    restoreFocus(buscaOrigin.current, buscaTriggerRef.current)
+    buscaOrigin.current = null
+  }
+
+  // O atalho da busca também funciona quando este painel é usado isoladamente.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
-        if (editing) return
+      if (e.defaultPrevented || e.isComposing || hasKeyboardLayer() || !currentDocument || editing) return
+      if (matchesCommand(e, 'findText')) {
         e.preventDefault()
-        setBuscaAberta(true)
-        setTimeout(() => buscaInputRef.current?.select(), 0)
+        abrirBusca()
         return
       }
       if (!buscaAberta) return
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        setBuscaAberta(false)
-        setTermo('')
-        return
-      }
-      if (e.key === 'F3') {
+      if (e.key === 'F3' && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault()
         irParaHit(e.shiftKey ? -1 : 1)
       }
@@ -598,7 +635,7 @@ export function TranscriptPanel(): JSX.Element {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buscaAberta, hits.length, editing])
+  }, [buscaAberta, hits.length, editing, currentDocument])
 
   // Termo novo recomeca do primeiro achado, senao o contador diria "7 de 2".
   useEffect(() => {
@@ -975,18 +1012,38 @@ export function TranscriptPanel(): JSX.Element {
     }
   }
 
-  const addNoteForPending = async (): Promise<void> => {
-    if (!pending || !currentDocument) return
-    const note = await createNote({
-      scope: 'excerpt',
-      documentId: currentDocument.id,
-      startPos: pending.start,
-      endPos: pending.end
+  const createDocumentNote = async (range: Pick<PendingSelection, 'start' | 'end'> | null): Promise<void> => {
+    if (!currentDocument || editing) return
+    await run(async () => {
+      await useAppStore.getState().notesFlush?.()
+      const documentId = currentDocument.id
+      if (useAppStore.getState().currentDocument?.id !== documentId) return
+      const note = await createNote(range
+        ? { scope: 'excerpt', documentId, startPos: range.start, endPos: range.end }
+        : { scope: 'document', documentId })
+      if (useAppStore.getState().currentDocument?.id !== documentId) return
+      await openNoteEditor(note.id)
+      setPending(null)
+      window.getSelection()?.removeAllRanges()
+      keyboardPendingRef.current = false
     })
-    setPending(null)
-    window.getSelection()?.removeAllRanges()
-    openNoteEditor(note.id)
-    keyboardPendingRef.current = false
+  }
+
+  const noteFromSelection = (origin: HTMLElement | null): Promise<void> => {
+    const reader = readerRef.current
+    if (origin === reader && reader && reader.selectionStart !== reader.selectionEnd) {
+      return createDocumentNote({ start: originalOffset(reader.selectionStart), end: originalOffset(reader.selectionEnd) })
+    }
+    const selection = window.getSelection()
+    if (selection?.rangeCount && !selection.isCollapsed) {
+      const range = selection.getRangeAt(0)
+      if (textRef.current?.contains(range.startContainer) && textRef.current.contains(range.endContainer)) {
+        const start = resolveOffset(range.startContainer, range.startOffset)
+        const end = resolveOffset(range.endContainer, range.endOffset)
+        if (start != null && end != null && end > start) return createDocumentNote({ start, end })
+      }
+    }
+    return createDocumentNote(null)
   }
 
   // Nota de trecho desvinculada so tinha saida por desfazer ou apagar: 'attached'
@@ -1008,9 +1065,12 @@ export function TranscriptPanel(): JSX.Element {
 
   const reattachPendingNote = async (): Promise<void> => {
     if (!pending || !podeReligar || !notaParaReligar) return
-    await updateNote({ id: notaParaReligar.id, startPos: pending.start, endPos: pending.end })
-    setPending(null)
-    window.getSelection()?.removeAllRanges()
+    await run(async () => {
+      await updateNote({ id: notaParaReligar.id, startPos: pending.start, endPos: pending.end })
+      setPending(null)
+      window.getSelection()?.removeAllRanges()
+      restoreReader(true)
+    })
   }
 
   const startEditing = (): void => {
@@ -1019,6 +1079,9 @@ export function TranscriptPanel(): JSX.Element {
     }
     setPending(null)
     setKeyboardReading(false)
+    setBuscaAberta(false)
+    setTermo('')
+    buscaOrigin.current = null
     setDraft(text)
     setSaveError(null)
     setEditing(true)
@@ -1064,6 +1127,25 @@ export function TranscriptPanel(): JSX.Element {
     }
   }
 
+  const noDocument = (): string | undefined => currentDocument ? undefined : 'Abra um documento primeiro.'
+  const onlyReading = (): string | undefined => noDocument() ?? (editing ? 'Saia da edição de texto primeiro.' : undefined)
+  const noRange = (origin: HTMLElement | null): string | undefined => onlyReading() ??
+    (origin === readerRef.current && readerRef.current && readerRef.current.selectionStart !== readerRef.current.selectionEnd
+      ? undefined : 'Selecione um trecho no modo de análise.')
+  const codeReaderSelection = (): void => {
+    const field = readerRef.current
+    if (!field) return
+    const rect = field.getBoundingClientRect()
+    openReaderSelection(field, rect.left + 8, rect.top + 40)
+  }
+  useWorkspaceActions({
+    findText: { run: abrirBusca, unavailable: onlyReading, allowWhileTyping: true },
+    newNote: { run: noteFromSelection, unavailable: onlyReading },
+    codeSelection: { run: codeReaderSelection, unavailable: noRange },
+    editText: { run: () => editing ? cancelEditing() : startEditing(), unavailable: noDocument },
+    saveText: { run: async () => { await saveEditing() }, unavailable: () => editing ? undefined : 'O documento não está em edição.' }
+  })
+
   // Faixas de códigos múltiplos atrás do texto, na leitura e no preview.
   const bandLayer = (
     <div className="pointer-events-none absolute inset-0" aria-hidden="true">
@@ -1105,18 +1187,17 @@ export function TranscriptPanel(): JSX.Element {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
-      if (event.defaultPrevented || event.isComposing || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return
-      const key = event.key.toLowerCase()
-      if (key !== 'e' && key !== 's') return
-      if (!currentDocument || (key === 's' && !editing)) return
+      if (event.defaultPrevented || event.isComposing) return
+      const save = matchesCommand(event, 'saveText')
+      if (!save && !matchesCommand(event, 'editText')) return
+      if (!currentDocument || (save && !editing)) return
       // Não disputa os atalhos de notas, buscas, renomeações ou diálogos.
-      if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return
+      if (hasKeyboardLayer()) return
       const target = event.target instanceof HTMLElement ? event.target : null
-      if (target !== textareaRef.current && target !== readerRef.current &&
-          (target?.isContentEditable || target?.closest('input, textarea, select, [contenteditable="true"]'))) return
+      if (target !== textareaRef.current && isTypingTarget(target)) return
       event.preventDefault()
       if (event.repeat || saving) return
-      if (key === 's') void saveEditing().catch(() => undefined)
+      if (save) void saveEditing().catch(() => undefined)
       else if (editing) void cancelEditing().catch(() => undefined)
       else startEditing()
     }
@@ -1168,28 +1249,20 @@ export function TranscriptPanel(): JSX.Element {
             <>
               {/* O Ctrl+F sozinho não se mostra: a lupa é como a busca é descoberta. */}
               <Button
+                ref={buscaTriggerRef}
+                data-focus-key="document-search"
                 size="sm"
                 variant={buscaAberta ? 'secondary' : 'ghost'}
-                title="Buscar no documento (Ctrl+F)"
-                onClick={() => {
-                  if (buscaAberta) {
-                    setBuscaAberta(false)
-                    setTermo('')
-                  } else {
-                    setBuscaAberta(true)
-                    setTimeout(() => buscaInputRef.current?.select(), 0)
-                  }
-                }}
+                aria-label="Buscar no documento"
+                title={`Buscar no documento (${shortcutLabel('findText')})`}
+                onClick={buscaAberta ? fecharBusca : abrirBusca}
               >
                 <Search className="h-4 w-4" />
               </Button>
-              <Button size="sm" variant="outline" title="Editar texto (Ctrl+E)" onClick={startEditing}>
+              <Button size="sm" variant="outline" data-focus-key="document-edit" title={`Editar texto (${shortcutLabel('editText')})`} onClick={startEditing}>
                 <Pencil className="h-4 w-4" /> Editar texto
               </Button>
-              <Button size="sm" variant="ghost" data-focus-document data-area-default title="Navegar pelo texto sem editar" onClick={() => {
-                if (readerRef.current) readerRef.current.focus({ preventScroll: true })
-                else setKeyboardReading(true)
-              }}>
+              <Button ref={readerTriggerRef} size="sm" variant="ghost" data-focus-document data-area-default data-focus-key="document-reader-trigger" aria-pressed={keyboardReading} title="Navegar pelo texto sem editar" onClick={startReader}>
                 Navegar pelo texto
               </Button>
             </>
@@ -1204,15 +1277,23 @@ export function TranscriptPanel(): JSX.Element {
           de altura zero ancora a caixa logo abaixo do cabeçalho. */}
       {buscaAberta && !editing && (
         <div className="relative z-20 h-0">
-        <div className="absolute right-4 top-2 flex w-96 max-w-[calc(100%-2rem)] items-center gap-1 rounded-md border bg-popover px-2 py-1.5 shadow-md">
+        <div className="absolute right-4 top-2 flex w-96 max-w-[calc(100%-2rem)] items-center gap-1 rounded-md border bg-popover px-2 py-1.5 shadow-md"
+          onKeyDown={(event) => {
+            if (event.defaultPrevented || event.nativeEvent.isComposing || !matchesCommand(event.nativeEvent, 'cancel') || hasKeyboardLayer()) return
+            event.preventDefault()
+            event.stopPropagation()
+            fecharBusca()
+          }}>
           <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <input
             ref={buscaInputRef}
+            data-focus-key="document-search-input"
+            aria-label="Buscar no texto"
             autoFocus
             value={termo}
             onChange={(e) => setTermo(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') {
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
                 e.preventDefault()
                 irParaHit(e.shiftKey ? -1 : 1)
               }
@@ -1251,10 +1332,7 @@ export function TranscriptPanel(): JSX.Element {
             size="sm"
             variant="ghost"
             className="h-7 px-1.5"
-            onClick={() => {
-              setBuscaAberta(false)
-              setTermo('')
-            }}
+            onClick={fecharBusca}
             title="Fechar (Esc)"
           >
             <X className="h-3.5 w-3.5" />
@@ -1335,6 +1413,8 @@ export function TranscriptPanel(): JSX.Element {
             </div>
             <textarea
               ref={textareaRef}
+              data-focus-key="document-editor"
+              data-area-default
               value={draft}
               onChange={(e) => {
                 const next = applyTextareaChange(draft, e.target.value)
@@ -1840,11 +1920,13 @@ export function TranscriptPanel(): JSX.Element {
         {keyboardReading && (
           <textarea
             ref={readerRef}
+            data-analysis-reader
+            data-focus-key="document-reader"
             value={readerText}
             onChange={() => {}}
             aria-readonly="true"
             aria-label={`Navegação somente leitura: ${currentDocument.name}`}
-            aria-description="Use as setas para navegar, Shift e setas para selecionar, Ctrl+Enter para codificar e Esc para sair da navegação."
+            aria-description={`Use as setas para navegar, Shift e setas para selecionar, ${shortcutLabel('codeSelection')} para codificar e Esc para sair da navegação.`}
             onSelect={(event) => {
               const field = event.currentTarget
               readerSelectionRef.current = {
@@ -1856,24 +1938,21 @@ export function TranscriptPanel(): JSX.Element {
             onScroll={(event) => {
               if (scrollRef.current) scrollRef.current.scrollTop = event.currentTarget.scrollTop
             }}
-            onMouseUp={(event) => {
-              openReaderSelection(event.currentTarget, event.clientX, event.clientY + 8)
-            }}
             onKeyDown={(event) => {
-              if (event.key === 'Escape' && !pending) {
+              if (event.defaultPrevented || event.nativeEvent.isComposing || hasKeyboardLayer()) return
+              if (matchesCommand(event.nativeEvent, 'cancel') && !pending) {
                 event.preventDefault()
                 event.stopPropagation()
                 setKeyboardReading(false)
-                requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('[data-focus-document]')?.focus())
-              } else if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                readerTriggerRef.current?.focus({ preventScroll: true })
+              } else if (matchesCommand(event.nativeEvent, 'codeSelection')) {
                 const field = event.currentTarget
                 if (field.selectionStart === field.selectionEnd) return
                 event.preventDefault()
-                const rect = field.getBoundingClientRect()
-                openReaderSelection(field, rect.left + 8, rect.top + 40)
+                codeReaderSelection()
               }
             }}
-            className="transcript-reader absolute inset-y-0 h-full resize-none overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] bg-transparent py-5 font-mono text-transparent caret-primary outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+            className="transcript-reader pointer-events-none absolute inset-y-0 h-full resize-none overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] bg-transparent py-5 font-mono text-transparent caret-primary outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
             style={{
               left: '4.75rem',
               right: `calc(${effectiveLaneWidth + (scrollRef.current ? scrollRef.current.offsetWidth - scrollRef.current.clientWidth : 0)}px + 1.875rem)`,
@@ -1885,7 +1964,7 @@ export function TranscriptPanel(): JSX.Element {
             }}
           />
         )}
-        {keyboardReading && <span className="pointer-events-none absolute bottom-2 right-2 rounded border bg-background px-2 py-1 text-xs shadow">Modo de análise — texto protegido · Ctrl+Enter para codificar · Esc para sair</span>}
+        {keyboardReading && <span className="pointer-events-none absolute bottom-2 right-2 rounded border bg-background px-2 py-1 text-xs shadow">Modo de análise — texto protegido · {shortcutLabel('codeSelection')} para codificar · Esc para sair</span>}
         </div>
       )}
 
@@ -1895,13 +1974,15 @@ export function TranscriptPanel(): JSX.Element {
           y={pending.y}
           onClose={(reason) => {
             setPending(null)
-            if (reason === 'escape') restoreReader()
-            else keyboardPendingRef.current = false
+            if (reason === 'escape') {
+              if (keyboardPendingRef.current) restoreReader()
+              else readerTriggerRef.current?.focus({ preventScroll: true })
+            } else keyboardPendingRef.current = false
           }}
           onApply={applyCode}
           onCreate={startCreateCode}
           selectedText={text.slice(pending.start, pending.end)}
-          onAddNote={() => void addNoteForPending()}
+          onAddNote={() => void createDocumentNote(pending)}
           onReattachNote={podeReligar ? () => void reattachPendingNote() : undefined}
         />
       )}

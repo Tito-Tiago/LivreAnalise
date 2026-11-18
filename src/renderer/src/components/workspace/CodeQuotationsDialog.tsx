@@ -83,16 +83,20 @@ export function CodeQuotationsDialog({ code, onOpenChange, returnFocus }: Props)
   // As setas percorrem a LISTA, não o texto: num diálogo que cobre a
   // transcrição, navegar pelo documento por baixo não mostraria nada. Abrir a
   // ocorrência é o clique (ou Enter), e aí o diálogo sai da frente.
-  const andar = (dir: 1 | -1): void => {
+  const andar = (dir: 1 | -1, moverFoco = false): void => {
     if (visiveis.length === 0) return
-    setAtual((i) => (Math.min(i, visiveis.length - 1) + dir + visiveis.length) % visiveis.length)
+    const next = (indice + dir + visiveis.length) % visiveis.length
+    setAtual(next)
+    if (moverFoco) {
+      listaRef.current?.querySelector<HTMLButtonElement>(`[data-indice="${next}"]`)?.focus({ preventScroll: true })
+    }
   }
 
   useEffect(() => {
     if (indice < 0) return
     listaRef.current
       ?.querySelector(`[data-indice="${indice}"]`)
-      ?.scrollIntoView({ block: 'nearest' })
+      ?.scrollIntoView?.({ block: 'nearest' })
   }, [indice])
 
   const abrir = async (q: CodingWithCode): Promise<void> => {
@@ -105,14 +109,13 @@ export function CodeQuotationsDialog({ code, onOpenChange, returnFocus }: Props)
   }
 
   const onKeyDown = (e: React.KeyboardEvent): void => {
-    if (memoOpen || e.nativeEvent.isComposing || e.defaultPrevented) return
+    if (memoOpen || e.nativeEvent.isComposing || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
     if (e.key === 'Enter' && e.target instanceof HTMLButtonElement) return
-    if (e.key === 'ArrowDown') {
+    if (indice >= 0 && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
       e.preventDefault()
-      andar(1)
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      andar(-1)
+      // No filtro, manter o foco no campo para continuar digitando. Fora
+      // dele, o foco acompanha o destaque e Enter ativa o botão correto.
+      andar(e.key === 'ArrowDown' ? 1 : -1, !(e.target instanceof HTMLInputElement))
     } else if (e.key === 'Enter' && indice >= 0) {
       e.preventDefault()
       void abrir(visiveis[indice])
@@ -264,6 +267,7 @@ export function CodeQuotationsDialog({ code, onOpenChange, returnFocus }: Props)
                 data-indice={i}
                 title="Localizar no texto"
                 onClick={() => void abrir(q)}
+                onFocus={() => setAtual(i)}
                 onMouseEnter={() => setAtual(i)}
                 className={cn(
                   'block w-full rounded-md border p-3 text-left text-sm transition-colors hover:bg-accent',

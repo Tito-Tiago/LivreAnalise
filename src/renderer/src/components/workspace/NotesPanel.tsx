@@ -263,7 +263,7 @@ function NoteEditor({ note, onBack }: { note: Note; onBack: () => void }): JSX.E
   )
 }
 
-export function NotesPanel({ onReturnFocus }: { onReturnFocus?: () => void } = {}): JSX.Element {
+export function NotesPanel({ onReturnFocus }: { onReturnFocus?: (noteId: number | null) => void } = {}): JSX.Element {
   const currentDocument = useAppStore((s) => s.currentDocument)
   const documentNotes = useAppStore((s) => s.documentNotes)
   const projectNotes = useAppStore((s) => s.projectNotes)
@@ -274,11 +274,11 @@ export function NotesPanel({ onReturnFocus }: { onReturnFocus?: () => void } = {
   const [erroLista, setErroLista] = useState<string | null>(null)
   const { error: navigationError, run } = useAsyncAction()
   const panel = useRef<HTMLDivElement>(null)
-  const editorOrigin = useRef<FocusAnchor | null>(null)
+  const editorOrigin = useRef<{ id: number; anchor: FocusAnchor } | null>(null)
   const close = useCallback(async (): Promise<void> => {
     await toggleNotesPanel()
-    onReturnFocus?.()
-  }, [toggleNotesPanel, onReturnFocus])
+    onReturnFocus?.(editorNoteId)
+  }, [toggleNotesPanel, onReturnFocus, editorNoteId])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -300,20 +300,20 @@ export function NotesPanel({ onReturnFocus }: { onReturnFocus?: () => void } = {
   const editingNote = allNotes.find((n) => n.id === editorNoteId) ?? null
   useScrollMemory(listRef, listPosition, !editingNote)
 
-  const open = async (id: number): Promise<void> => {
-    const origin = document.activeElement
-    editorOrigin.current = panel.current?.contains(origin) ? captureFocus(origin) : null
+  const open = async (id: number, origin = document.activeElement): Promise<void> => {
+    const anchor = panel.current?.contains(origin) ? captureFocus(origin) : null
     await openNoteEditor(id)
+    editorOrigin.current = anchor ? { id, anchor } : null
   }
 
   const back = (): void => {
     void run(async () => {
       await openNoteEditor(null)
-      const origin = editorOrigin.current
+      const origin = editorOrigin.current?.id === editorNoteId ? editorOrigin.current.anchor : null
       editorOrigin.current = null
       requestAnimationFrame(() => {
         if (origin) restoreFocus(origin, panel.current?.querySelector('[data-area-default]'))
-        else if (onReturnFocus) onReturnFocus()
+        else if (onReturnFocus) onReturnFocus(editorNoteId)
         else panel.current?.querySelector<HTMLElement>('[data-area-default]')?.focus({ preventScroll: true })
       })
     })
@@ -345,13 +345,14 @@ export function NotesPanel({ onReturnFocus }: { onReturnFocus?: () => void } = {
   }
 
   const handleCreate = async (scope: 'document' | 'project'): Promise<void> => {
+    const origin = document.activeElement
     try {
       const note = await createNote(
         scope === 'document' && currentDocument
           ? { scope, documentId: currentDocument.id }
           : { scope: 'project' }
       )
-      await open(note.id)
+      await open(note.id, origin)
     } catch (e) {
       // antes a falha virava rejeicao sem dono: o botao simplesmente nao fazia nada
       setErroLista(mensagemDeErro(e, 'Não foi possível criar a nota.'))
@@ -489,7 +490,7 @@ export function NotesPanel({ onReturnFocus }: { onReturnFocus?: () => void } = {
               </div>
               <div className="space-y-2">
                 {project.map((n) => (
-                  <NoteCard key={n.id} note={n} quote={null} onOpen={() => void run(() => openNoteEditor(n.id))} />
+                  <NoteCard key={n.id} note={n} quote={null} onOpen={() => void run(() => open(n.id))} />
                 ))}
                 {project.length === 0 && (
                   <p className="text-xs text-muted-foreground">

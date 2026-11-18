@@ -134,7 +134,9 @@ function resolveOffset(node: Node, offset: number): number | null {
   return null
 }
 
-export function TranscriptPanel(): JSX.Element {
+export function TranscriptPanel({ onNoteOpened }: {
+  onNoteOpened?: (id: number, origin: FocusAnchor | null) => void
+} = {}): JSX.Element {
   const currentDocument = useAppStore((s) => s.currentDocument)
   const codings = useAppStore((s) => s.codings)
   const codes = useAppStore((s) => s.codes)
@@ -176,7 +178,7 @@ export function TranscriptPanel(): JSX.Element {
   const notesViewportRef = useRef<TranscriptViewport | null>(null)
   const [pending, setPending] = useState<PendingSelection | null>(null)
   const [excerptMenu, setExcerptMenu] = useState<{
-    x: number; y: number; codingIds: number[]; noteIds: number[]
+    x: number; y: number; codingIds: number[]; noteIds: number[]; origin?: FocusAnchor | null
   } | null>(null)
   const closeExcerptMenu = useCallback(() => setExcerptMenu(null), [])
   const selectionGestureRef = useRef(false)
@@ -959,16 +961,28 @@ export function TranscriptPanel(): JSX.Element {
     setPending({ start, end, x: rect.left, y: rect.bottom + 6 })
   }
 
+  const focusOrigin = (element: Element | null = document.activeElement): FocusAnchor | null => {
+    if (element?.closest('[role="dialog"], [role="menu"]')) {
+      return captureFocus(keyboardPendingRef.current ? readerRef.current : readerTriggerRef.current)
+    }
+    return captureFocus(element) ?? captureFocus(readerTriggerRef.current)
+  }
+
+  const openTranscriptNote = async (id: number, origin: FocusAnchor | null): Promise<void> => {
+    await openNoteEditor(id)
+    onNoteOpened?.(id, origin)
+  }
+
   const activateExcerpt = (codingIds: number[], noteIds: number[], x: number, y: number): void => {
     if (selectionGestureRef.current || dragging) return
     setPending(null)
     setExcerptMenu(null)
     const action = excerptAction(codingIds, noteIds)
     if (action === 'choose') {
-      setExcerptMenu({ x, y, codingIds, noteIds })
+      setExcerptMenu({ x, y, codingIds, noteIds, origin: focusOrigin() })
     } else if (action === 'note') {
       setSelectedCodingId(null)
-      openNoteEditor(noteIds[0])
+      void run(() => openTranscriptNote(noteIds[0], focusOrigin()))
     } else if (action === 'code') {
       setSelectedCodingId(codingIds[0])
     }
@@ -1012,7 +1026,9 @@ export function TranscriptPanel(): JSX.Element {
     }
   }
 
-  const createDocumentNote = async (range: Pick<PendingSelection, 'start' | 'end'> | null): Promise<void> => {
+  const createDocumentNote = async (
+    range: Pick<PendingSelection, 'start' | 'end'> | null, origin: FocusAnchor | null
+  ): Promise<void> => {
     if (!currentDocument || editing) return
     await run(async () => {
       await useAppStore.getState().notesFlush?.()
@@ -1022,7 +1038,7 @@ export function TranscriptPanel(): JSX.Element {
         ? { scope: 'excerpt', documentId, startPos: range.start, endPos: range.end }
         : { scope: 'document', documentId })
       if (useAppStore.getState().currentDocument?.id !== documentId) return
-      await openNoteEditor(note.id)
+      await openTranscriptNote(note.id, origin)
       setPending(null)
       window.getSelection()?.removeAllRanges()
       keyboardPendingRef.current = false
@@ -1030,9 +1046,10 @@ export function TranscriptPanel(): JSX.Element {
   }
 
   const noteFromSelection = (origin: HTMLElement | null): Promise<void> => {
+    const anchor = focusOrigin(origin)
     const reader = readerRef.current
     if (origin === reader && reader && reader.selectionStart !== reader.selectionEnd) {
-      return createDocumentNote({ start: originalOffset(reader.selectionStart), end: originalOffset(reader.selectionEnd) })
+      return createDocumentNote({ start: originalOffset(reader.selectionStart), end: originalOffset(reader.selectionEnd) }, anchor)
     }
     const selection = window.getSelection()
     if (selection?.rangeCount && !selection.isCollapsed) {
@@ -1040,10 +1057,10 @@ export function TranscriptPanel(): JSX.Element {
       if (textRef.current?.contains(range.startContainer) && textRef.current.contains(range.endContainer)) {
         const start = resolveOffset(range.startContainer, range.startOffset)
         const end = resolveOffset(range.endContainer, range.endOffset)
-        if (start != null && end != null && end > start) return createDocumentNote({ start, end })
+        if (start != null && end != null && end > start) return createDocumentNote({ start, end }, anchor)
       }
     }
-    return createDocumentNote(null)
+    return createDocumentNote(null, anchor)
   }
 
   // Nota de trecho desvinculada so tinha saida por desfazer ou apagar: 'attached'
@@ -1506,8 +1523,9 @@ export function TranscriptPanel(): JSX.Element {
                     e.stopPropagation()
                     setSelectedCodingId(null)
                     setPending(null)
-                    if (singleId != null) openNoteEditor(singleId)
-                    else setExcerptMenu({ x: e.clientX, y: e.clientY + 8, codingIds: [], noteIds: mark.ids })
+                     const origin = focusOrigin(e.currentTarget)
+                     if (singleId != null) void run(() => openTranscriptNote(singleId, origin))
+                     else setExcerptMenu({ x: e.clientX, y: e.clientY + 8, codingIds: [], noteIds: mark.ids, origin })
                   }}
                 >
                   <MessageSquare className="h-3.5 w-3.5" />
@@ -1982,7 +2000,7 @@ export function TranscriptPanel(): JSX.Element {
           onApply={applyCode}
           onCreate={startCreateCode}
           selectedText={text.slice(pending.start, pending.end)}
-          onAddNote={() => void createDocumentNote(pending)}
+          onAddNote={() => void createDocumentNote(pending, focusOrigin())}
           onReattachNote={podeReligar ? () => void reattachPendingNote() : undefined}
         />
       )}
@@ -1997,7 +2015,11 @@ export function TranscriptPanel(): JSX.Element {
             return code ? [{ id, name: code.name, color: code.color }] : []
           })}
           onClose={closeExcerptMenu}
-          onOpenNote={(id) => { setSelectedCodingId(null); openNoteEditor(id); closeExcerptMenu() }}
+          onOpenNote={(id) => {
+            setSelectedCodingId(null)
+            void run(() => openTranscriptNote(id, excerptMenu.origin ?? focusOrigin()))
+            closeExcerptMenu()
+          }}
           onSelectCode={(id) => { setSelectedCodingId(id); closeExcerptMenu() }}
         />
       )}

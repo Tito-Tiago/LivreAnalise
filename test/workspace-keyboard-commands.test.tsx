@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import App from '../src/renderer/src/App'
 import { useAppStore } from '../src/renderer/src/stores/appStore'
-import type { CodeWithCount, Collection, DocumentWithText, Note } from '../src/shared/types'
+import type { CodeWithCount, CodingWithCode, Collection, DocumentWithText, Note } from '../src/shared/types'
 
 const doc: DocumentWithText = {
   id: 1, guid: 'd', name: 'Entrevista', plainText: 'Primeira linha\nSegunda linha',
@@ -22,6 +22,7 @@ const collection: Collection = { id: 1, guid: 'g', name: 'Grupo', memo: '', crea
 const otherCollection: Collection = { ...collection, id: 2, guid: 'g2', name: 'Outro grupo' }
 const undo = vi.fn(async () => null)
 const redo = vi.fn(async () => null)
+const listByCode = vi.fn(async (_id: number): Promise<CodingWithCode[]> => [])
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -43,7 +44,9 @@ beforeEach(() => {
   Object.defineProperty(window, 'api', {
     configurable: true, value: {
       app: { onCloseRequested: () => () => {}, setTextDirty: vi.fn(), setMemoDirty: vi.fn() },
-      view: { onAction: () => () => {}, setFont: vi.fn(), fontChanged: vi.fn() }
+      view: { onAction: () => () => {}, setFont: vi.fn(), fontChanged: vi.fn() },
+      codings: { listByCode },
+      versions: { onChanged: () => () => {}, list: async () => [] }
     }
   })
 })
@@ -111,6 +114,40 @@ it('abre memo pelo atalho e devolve o foco ao item da árvore ao fechar', async 
   await waitFor(() => expect(document.activeElement).toBe(group))
 })
 
+it('abre com Enter a citação destacada pelas setas, sem bloquear Enter nos botões do diálogo', async () => {
+  const user = userEvent.setup()
+  const first: CodingWithCode = {
+    id: 1, guid: 'q1', documentId: doc.id, codeId: a.id, startPos: 0, endPos: 8,
+    createdAt: '', codeName: a.name, codeColor: a.color, text: 'Primeira'
+  }
+  const second = { ...first, id: 2, guid: 'q2', startPos: 15, endPos: 22, text: 'Segunda' }
+  const locateOccurrence = vi.fn(async () => true)
+  listByCode.mockResolvedValueOnce([first, second])
+  useAppStore.setState({ locateOccurrence })
+  render(<App />)
+
+  await user.click(screen.getByRole('button', { name: 'Códigos', exact: true }))
+  const row = screen.getAllByRole('treeitem', { name: 'Alfa' })[0]
+  act(() => row.focus())
+  await user.keyboard('{Enter}')
+  const dialog = await screen.findByRole('dialog', { name: /Trechos de "Alfa"/ })
+  await within(dialog).findByRole('button', { name: /Segunda/ })
+  const memo = within(dialog).getByRole('button', { name: 'Memo' })
+  memo.focus()
+  await user.keyboard('{Enter}')
+  expect(locateOccurrence).not.toHaveBeenCalled()
+  expect(within(dialog).getByRole('textbox', { name: 'Texto do memo' })).toBeTruthy()
+  await user.keyboard('{Escape}')
+  await waitFor(() => expect(within(dialog).queryByRole('textbox', { name: 'Texto do memo' })).toBeNull())
+  within(dialog).getByRole('button', { name: 'Trechos' }).focus()
+  await user.keyboard('{ArrowDown}')
+  expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: /Segunda/ }))
+  await user.keyboard('{Enter}')
+  expect(locateOccurrence).toHaveBeenCalledTimes(1)
+  expect(locateOccurrence).toHaveBeenCalledWith(second)
+  await waitFor(() => expect(document.activeElement).toBe(row))
+})
+
 it('cria nota do trecho pelo atalho e retorna ao leitor sem perder a seleção', async () => {
   const user = userEvent.setup()
   const createNote = vi.fn(async (input): Promise<Note> => {
@@ -131,9 +168,29 @@ it('cria nota do trecho pelo atalho e retorna ao leitor sem perder a seleção',
   expect(createNote).toHaveBeenCalledWith({ scope: 'excerpt', documentId: 1, startPos: 0, endPos: 8 })
   const title = await screen.findByRole('textbox', { name: 'Título da nota' })
   expect(document.activeElement).toBe(title)
+  await user.keyboard('{F6}')
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'LivreAnalise' }))
+  await user.keyboard('{Shift>}{F6}{/Shift}')
+  expect(document.activeElement).toBe(title)
   await user.click(screen.getByRole('button', { name: 'Voltar' }))
   await waitFor(() => expect(document.activeElement).toBe(reader))
   expect([reader.selectionStart, reader.selectionEnd]).toEqual([0, 8])
+})
+
+it.each([
+  ['abrir configuracoes', 'Configurações'],
+  ['ver versoes do projeto', 'Versões do projeto'],
+  ['exportar texto para ia', 'Exportar para IA']
+])('devolve ao leitor o foco após fechar %s aberta pela paleta', async (query, dialogName) => {
+  const user = userEvent.setup()
+  render(<App />)
+  await user.click(screen.getByRole('button', { name: 'Navegar pelo texto' }))
+  const reader = screen.getByRole('textbox', { name: /Navegação somente leitura/ })
+  await user.keyboard('{Control>}k{/Control}')
+  await user.type(screen.getByRole('combobox', { name: 'Buscar comando' }), `${query}{Enter}`)
+  expect(await screen.findByRole('dialog', { name: dialogName })).toBeTruthy()
+  await user.keyboard('{Escape}')
+  await waitFor(() => expect(document.activeElement).toBe(reader))
 })
 
 it('busca comandos e atalhos, mostra indisponibilidade e só abre a ação após fechar a paleta', async () => {

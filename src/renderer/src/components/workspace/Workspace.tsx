@@ -25,6 +25,7 @@ export function Workspace(): JSX.Element {
   const workspaceRef = useRef<HTMLDivElement>(null)
   const lastFocus = useRef(new Map<string, FocusAnchor>())
   const lastOutsideNotes = useRef<FocusAnchor | null>(null)
+  const noteOrigin = useRef<{ id: number; documentGuid: string | undefined; anchor: FocusAnchor | null } | null>(null)
   const surfaceOrigin = useRef<FocusAnchor | null>(null)
   const codeOrigin = useRef<FocusAnchor | null>(null)
   const notesPanelOpen = useAppStore((s) => s.notesPanelOpen)
@@ -58,8 +59,14 @@ export function Workspace(): JSX.Element {
     setSurface(next)
   }
 
-  const returnFromNotes = (): void => {
-    const origin = lastOutsideNotes.current ?? lastFocus.current.get('document') ?? null
+  const rememberNoteOrigin = (id: number, anchor: FocusAnchor | null): void => {
+    noteOrigin.current = { id, documentGuid: currentDocument?.guid, anchor }
+  }
+
+  const returnFromNotes = (noteId: number | null): void => {
+    const saved = noteOrigin.current
+    const origin = (saved && saved.id === noteId && saved.documentGuid === useAppStore.getState().currentDocument?.guid
+      ? saved.anchor : null) ?? lastOutsideNotes.current ?? lastFocus.current.get('document') ?? null
     restoreFocus(origin, workspaceRef.current?.querySelector('[data-area-default]'))
   }
 
@@ -69,7 +76,7 @@ export function Workspace(): JSX.Element {
     await store.toggleNotesPanel()
     requestAnimationFrame(() => {
       if (!wasOpen) moveTo('notes')
-      else if (!origin?.isConnected || origin.closest('[data-workspace-area="notes"]')) returnFromNotes()
+      else if (!origin?.isConnected || origin.closest('[data-workspace-area="notes"]')) returnFromNotes(store.editorNoteId)
     })
   }
 
@@ -206,7 +213,7 @@ export function Workspace(): JSX.Element {
       {error && <p role="alert" className="px-3 py-1 text-sm text-destructive">{error}</p>}
       <div className="flex min-h-0 flex-1">
         <div data-workspace-area="sidebar" className="contents"><Sidebar onViewCode={showCode} /></div>
-        <div data-workspace-area="document" className="flex min-w-0 flex-1"><TranscriptPanel /></div>
+        <div data-workspace-area="document" className="flex min-w-0 flex-1"><TranscriptPanel onNoteOpened={rememberNoteOrigin} /></div>
         {notesPanelOpen && <div data-workspace-area="notes" className="contents"><NotesPanel onReturnFocus={returnFromNotes} /></div>}
       </div>
       <CodeQuotationsDialog

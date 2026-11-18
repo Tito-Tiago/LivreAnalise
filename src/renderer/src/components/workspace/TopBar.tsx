@@ -1,4 +1,4 @@
-import { type JSX, useState } from 'react'
+import { type JSX, useRef, useState } from 'react'
 import { BookText, ChevronDown, CircleHelp, Download, History, Loader2, Redo2, Settings, Sparkles, StickyNote, Undo2 } from 'lucide-react'
 import { useAppStore } from '@/stores/appStore'
 import { mensagemDeErro } from '@/lib/erros'
@@ -13,8 +13,10 @@ import { AiExportDialog } from './AiExportDialog'
 import { VersionsDialog } from './VersionsDialog'
 import { SettingsDialog } from '@/components/SettingsDialog'
 import { useAsyncAction } from '@/lib/useAsyncAction'
-import { shortcutLabel } from '@/lib/keyboard'
+import { captureFocus, shortcutLabel, type FocusAnchor } from '@/lib/keyboard'
 import { useWorkspaceActions } from '@/lib/workspaceActions'
+
+type ToolbarDialog = 'settings' | 'versions' | 'exportAi'
 
 export function TopBar({ onKeyboardHelp, onToggleNotes }: {
   onKeyboardHelp?: () => void
@@ -27,17 +29,19 @@ export function TopBar({ onKeyboardHelp, onToggleNotes }: {
   const documentNotes = useAppStore((s) => s.documentNotes)
   const projectNotes = useAppStore((s) => s.projectNotes)
   const [working, setWorking] = useState(false)
-  const [exportarIa, setExportarIa] = useState(false)
-  const [versoes, setVersoes] = useState(false)
-  const [settings, setSettings] = useState(false)
+  const [dialog, setDialog] = useState<ToolbarDialog | null>(null)
+  const dialogOrigin = useRef<FocusAnchor | null>(null)
+  const exportTrigger = useRef<HTMLButtonElement>(null)
   const { error, run } = useAsyncAction()
   const noteCount = documentNotes.length + projectNotes.length
   const history = useAppStore((s) => s.history)
   const undo = useAppStore((s) => s.undo)
   const redo = useAppStore((s) => s.redo)
-  const abrirConfiguracoes = (): void => setSettings(true)
-  const abrirVersoes = (): void => setVersoes(true)
-  const exportarParaIa = (): void => setExportarIa(true)
+  const openDialog = (name: ToolbarDialog, origin: HTMLElement | null): void => {
+    dialogOrigin.current = captureFocus(origin ?? document.activeElement)
+    setDialog(name)
+  }
+  const closeDialog = (open: boolean): void => { if (!open) setDialog(null) }
 
   const handleExport = async (): Promise<void> => {
     setWorking(true)
@@ -58,9 +62,9 @@ export function TopBar({ onKeyboardHelp, onToggleNotes }: {
   }
 
   useWorkspaceActions({
-    settings: { run: abrirConfiguracoes },
-    versions: { run: abrirVersoes },
-    exportAi: { run: exportarParaIa, unavailable: () => working ? 'Uma exportação já está em andamento.' : undefined },
+    settings: { run: (origin) => openDialog('settings', origin) },
+    versions: { run: (origin) => openDialog('versions', origin) },
+    exportAi: { run: (origin) => openDialog('exportAi', origin), unavailable: () => working ? 'Uma exportação já está em andamento.' : undefined },
     exportQdpx: { run: handleExport, unavailable: () => working ? 'Uma exportação já está em andamento.' : undefined }
   })
 
@@ -125,13 +129,13 @@ export function TopBar({ onKeyboardHelp, onToggleNotes }: {
         {onKeyboardHelp && <Button size="sm" variant="ghost" data-focus-key="toolbar-help" onClick={onKeyboardHelp} aria-label="Ajuda de atalhos" title={`Ajuda de atalhos (${shortcutLabel('help')})`}>
           <CircleHelp className="h-4 w-4" />
         </Button>}
-        <Button size="sm" variant="ghost" data-focus-key="toolbar-settings" onClick={abrirConfiguracoes} aria-label="Configurações" title="Configurações">
+        <Button size="sm" variant="ghost" data-focus-key="toolbar-settings" onClick={(event) => openDialog('settings', event.currentTarget)} aria-label="Configurações" title="Configurações">
           <Settings className="h-4 w-4" />
         </Button>
         <Button
           size="sm"
           variant="ghost"
-          onClick={abrirVersoes}
+          onClick={(event) => openDialog('versions', event.currentTarget)}
           aria-label="Versões do projeto"
           title="Versões do projeto"
         >
@@ -141,7 +145,7 @@ export function TopBar({ onKeyboardHelp, onToggleNotes }: {
             a ler o complemento para saber qual era qual, e apertavam a barra. */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="sm" variant="outline" disabled={working}>
+            <Button ref={exportTrigger} size="sm" variant="outline" disabled={working}>
               {working ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
@@ -152,7 +156,7 @@ export function TopBar({ onKeyboardHelp, onToggleNotes }: {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-72">
-            <DropdownMenuItem onClick={exportarParaIa}>
+            <DropdownMenuItem onSelect={() => openDialog('exportAi', exportTrigger.current)}>
               <Sparkles className="h-4 w-4" />
               <span className="flex flex-col items-start">
                 <span>Para IA</span>
@@ -173,9 +177,9 @@ export function TopBar({ onKeyboardHelp, onToggleNotes }: {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <AiExportDialog open={exportarIa} onOpenChange={setExportarIa} />
-      <VersionsDialog open={versoes} onOpenChange={setVersoes} />
-      <SettingsDialog open={settings} onOpenChange={setSettings} />
+      <AiExportDialog open={dialog === 'exportAi'} onOpenChange={closeDialog} returnFocus={dialogOrigin.current} />
+      <VersionsDialog open={dialog === 'versions'} onOpenChange={closeDialog} returnFocus={dialogOrigin.current} />
+      <SettingsDialog open={dialog === 'settings'} onOpenChange={closeDialog} returnFocus={dialogOrigin.current} />
     </div>
   )
 }

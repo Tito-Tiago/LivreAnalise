@@ -1,6 +1,6 @@
 {
   "name": "livreanalise",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "Codificação qualitativa de documentos, com os projetos no seu computador",
   "main": "./out/main/index.js",
   "author": "LivreAnalise",
@@ -14,7 +14,7 @@
     "dev": "node scripts/dev.mjs",
     "predev": "node scripts/ensure-electron-native.mjs",
     "build": "electron-vite build",
-    "start": "electron-vite preview",
+    "start": "node scripts/dev.mjs preview",
     "prestart": "node scripts/ensure-electron-native.mjs",
     "rebuild": "node scripts/rebuild-electron-native.mjs",
     "rebuild:node": "npm rebuild better-sqlite3",

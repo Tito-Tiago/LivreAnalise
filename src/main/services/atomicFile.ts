@@ -1,11 +1,11 @@
 import { randomUUID } from 'crypto'
 import { constants, copyFileSync, linkSync, renameSync, rmSync, writeFileSync } from 'fs'
-import { basename, dirname, join } from 'path'
+import { dirname, join } from 'path'
 
-function withTemporaryFile<T>(path: string, text: string, publish: (tmp: string) => T): T {
-  const tmp = join(dirname(path), `.${basename(path)}.${randomUUID()}.tmp`)
+function withTemporaryFile<T>(path: string, text: string, mode: number, publish: (tmp: string) => T): T {
+  const tmp = join(dirname(path), `.liva-${randomUUID()}.tmp`)
   try {
-    writeFileSync(tmp, text, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
+    writeFileSync(tmp, text, { encoding: 'utf8', flag: 'wx', mode })
     return publish(tmp)
   } finally {
     rmSync(tmp, { force: true })
@@ -13,7 +13,7 @@ function withTemporaryFile<T>(path: string, text: string, publish: (tmp: string)
 }
 
 export function writeAtomicFile(path: string, text: string): void {
-  withTemporaryFile(path, text, (tmp) => renameSync(tmp, path))
+  withTemporaryFile(path, text, 0o600, (tmp) => renameSync(tmp, path))
 }
 
 export function publishExclusiveFile(source: string, dest: string): void {
@@ -30,7 +30,7 @@ export function publishExclusiveFile(source: string, dest: string): void {
 // O hard link publica apenas o arquivo completo, sem sobrescrever nada, mesmo
 // se outra operação escolher o mesmo nome entre a verificação e a escrita.
 export function writeUniqueTextFile(path: string, text: string): string {
-  return withTemporaryFile(path, text, (tmp) => {
+  return withTemporaryFile(path, text, 0o666, (tmp) => {
     for (let n = 1; ; n++) {
       const candidate = n === 1 ? path : path.replace(/(\.[^./\\]+)?$/, ` (${n})$1`)
       try {

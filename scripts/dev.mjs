@@ -6,11 +6,13 @@ import { fileURLToPath } from 'node:url'
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const require = createRequire(import.meta.url)
 const viteRoot = dirname(require.resolve('electron-vite/package.json'))
-const args = ['dev', ...process.argv.slice(2)]
+const forwarded = process.argv.slice(2)
+const command = forwarded[0] === 'preview' ? forwarded.shift() : 'dev'
+const args = [command, ...forwarded]
 
 // No Linux, o opt-out precisa chegar ao Electron antes de iniciar o zygote.
 // appendSwitch no main e tarde demais e pode causar erros ESRCH em /dev/shm.
-// Somente este launcher de desenvolvimento desabilita o sandbox.
+// Este launcher é usado apenas em desenvolvimento e no preview local.
 if (process.platform === 'linux' && !args.includes('--noSandbox')) {
   args.splice(1, 0, '--noSandbox')
 }

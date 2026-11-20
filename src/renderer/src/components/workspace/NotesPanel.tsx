@@ -15,7 +15,7 @@ import { useAppStore } from '@/stores/appStore'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { mensagemDeErro } from '@/lib/erros'
-import { createNoteSaver } from '@/lib/noteAutosave'
+import { createNoteSaver, type PendingNote } from '@/lib/noteAutosave'
 import type { Note } from '@shared/types'
 import { useAsyncAction } from '@/lib/useAsyncAction'
 
@@ -80,47 +80,57 @@ type SaveStatus = 'saved' | 'dirty' | 'saving' | 'error'
 function NoteEditor({ note, onBack }: { note: Note; onBack: () => void }): JSX.Element {
   const updateNote = useAppStore((s) => s.updateNote)
   const deleteNote = useAppStore((s) => s.deleteNote)
-  const registerNotesFlush = useAppStore((s) => s.registerNotesFlush)
   const setNotasSujo = useAppStore((s) => s.setNotasSujo)
   const navigateToNote = useAppStore((s) => s.navigateToNote)
   const currentDocument = useAppStore((s) => s.currentDocument)
-
-  const [title, setTitle] = useState(note.title ?? '')
-  const [body, setBody] = useState(note.body)
-  const [status, setStatus] = useState<SaveStatus>('saved')
+  const [pending] = useState<PendingNote>(() => {
+    const state = useAppStore.getState()
+    const project = state.project?.guid ?? null
+    if (state.pendingNote?.id === note.id && state.pendingNote.project === project) {
+      return state.pendingNote
+    }
+    return {
+      project,
+      id: note.id,
+      documentId: note.documentId,
+      timer: null,
+      saver: createNoteSaver({ title: note.title ?? '', body: note.body }, async (draft) => {
+        if ((useAppStore.getState().project?.guid ?? null) !== project) {
+          throw new Error('O projeto desta nota não está aberto.')
+        }
+        const updated = await updateNote({
+          id: note.id,
+          title: draft.title.trim() === '' ? null : draft.title,
+          body: draft.body
+        })
+        return { title: updated.title ?? '', body: updated.body }
+      })
+    }
+  })
+  const [title, setTitle] = useState(() => pending.saver.read().title)
+  const [body, setBody] = useState(() => pending.saver.read().body)
+  const [status, setStatus] = useState<SaveStatus>(() =>
+    useAppStore.getState().pendingNote === pending ? 'dirty' : 'saved'
+  )
   const [erro, setErro] = useState<string | null>(null)
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Apagada: a limpeza do efeito nao pode gravar numa nota que nao existe mais
   const apagadaRef = useRef(false)
 
-  const updateNoteRef = useRef(updateNote)
-  updateNoteRef.current = updateNote
-
-  const [saver] = useState(() => createNoteSaver(
-    { title: note.title ?? '', body: note.body },
-    async (draft) => {
-      const updated = await updateNoteRef.current({
-        id: note.id,
-        title: draft.title.trim() === '' ? null : draft.title,
-        body: draft.body
-      })
-      return { title: updated.title ?? '', body: updated.body }
-    }
-  ))
-  useEffect(() => () => {
-    if (timerRef.current) clearTimeout(timerRef.current)
-  }, [])
-
   const saveNow = useCallback(async (): Promise<void> => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current)
-      timerRef.current = null
+    if (pending.timer) {
+      clearTimeout(pending.timer)
+      pending.timer = null
     }
-    if (apagadaRef.current) return
+    if (apagadaRef.current || useAppStore.getState().pendingNote !== pending) {
+      setStatus('saved')
+      return
+    }
     setStatus('saving')
     try {
-      await saver.flush()
-      setNotasSujo(false)
+      await pending.saver.flush()
+      if (useAppStore.getState().pendingNote === pending) {
+        useAppStore.setState({ pendingNote: null, notesFlush: null })
+        setNotasSujo(false)
+      }
       setStatus('saved')
       setErro(null)
     } catch (e) {
@@ -128,40 +138,47 @@ function NoteEditor({ note, onBack }: { note: Note; onBack: () => void }): JSX.E
       setErro(mensagemDeErro(e, 'Não foi possível salvar a nota.'))
       throw e
     }
-  }, [saver, setNotasSujo])
+  }, [pending, setNotasSujo])
 
-  const saveRef = useRef(saveNow)
-  saveRef.current = saveNow
   useEffect(() => {
-    registerNotesFlush(() => saveRef.current())
-    return () => registerNotesFlush(null)
-  }, [registerNotesFlush])
+    if (useAppStore.getState().pendingNote !== pending) return
+    // Uma remontagem da mesma nota reassume a gravação e seu estado visual.
+    useAppStore.setState({ notesFlush: saveNow })
+  }, [pending, saveNow])
 
-
+  const closingProject = useAppStore((s) => s.closingProject)
   const handleChange = (t: string, b: string): void => {
+    if (useAppStore.getState().closingProject) return
     setTitle(t)
     setBody(b)
-    saver.change({ title: t, body: b })
+    pending.saver.change({ title: t, body: b })
+    useAppStore.setState({ pendingNote: pending, notesFlush: saveNow })
     setNotasSujo(true)
     setStatus('dirty')
-    if (timerRef.current) clearTimeout(timerRef.current)
-    timerRef.current = setTimeout(() => void saveRef.current().catch(() => undefined), AUTOSAVE_DELAY)
+    if (pending.timer) clearTimeout(pending.timer)
+    pending.timer = setTimeout(() => {
+      const state = useAppStore.getState()
+      if (state.pendingNote === pending) void state.notesFlush?.().catch(() => undefined)
+    }, AUTOSAVE_DELAY)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent): void => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
       e.preventDefault()
-      void saveRef.current().catch(() => undefined)
+      void saveNow().catch(() => undefined)
     }
   }
 
   const handleDelete = async (): Promise<void> => {
     if (!window.confirm('Apagar esta nota? O conteúdo será perdido.')) return
-    if (timerRef.current) clearTimeout(timerRef.current)
+    if (pending.timer) clearTimeout(pending.timer)
     apagadaRef.current = true
     try {
       await deleteNote(note.id)
-      setNotasSujo(false)
+      if (useAppStore.getState().pendingNote === pending) {
+        useAppStore.setState({ pendingNote: null, notesFlush: null })
+        setNotasSujo(false)
+      }
     } catch (e) {
       apagadaRef.current = false
       // sem isto o clique nao fazia nada depois de voce ja ter confirmado, e o
@@ -186,7 +203,7 @@ function NoteEditor({ note, onBack }: { note: Note; onBack: () => void }): JSX.E
   return (
     <div className="flex h-full flex-col" onKeyDown={handleKeyDown}>
       <div className="flex items-center gap-1 border-b px-2 py-2">
-        <Button size="sm" variant="ghost" onClick={() => void saveRef.current().then(onBack).catch(() => undefined)}>
+        <Button size="sm" variant="ghost" onClick={() => void saveNow().then(onBack).catch(() => undefined)}>
           <ArrowLeft className="h-4 w-4" /> Voltar
         </Button>
         <span role="status" className="ml-auto text-[11px] text-muted-foreground">
@@ -237,6 +254,7 @@ function NoteEditor({ note, onBack }: { note: Note; onBack: () => void }): JSX.E
         )}
         <input
           aria-label="Título da nota"
+          readOnly={closingProject}
           value={title}
           onChange={(e) => handleChange(e.target.value, body)}
           placeholder="Título da nota"
@@ -244,6 +262,7 @@ function NoteEditor({ note, onBack }: { note: Note; onBack: () => void }): JSX.E
         />
         <textarea
           aria-label="Conteúdo da nota"
+          readOnly={closingProject}
           value={body}
           onChange={(e) => handleChange(title, e.target.value)}
           placeholder="Escreva o memo aqui…"

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -44,4 +44,19 @@ it('preserves existing files even on filesystems without hard-link support', () 
   const next = writeUniqueTextFile(path, 'novo')
   expect(readFileSync(path, 'utf8')).toBe('preservar')
   expect(readFileSync(next, 'utf8')).toBe('novo')
+})
+
+it.skipIf(process.platform === 'win32')('uses normal umask for a transcript and keeps catalogs private', () => {
+  const transcript = writeUniqueTextFile(join(dir, 'transcript.txt'), 'texto')
+  const catalog = join(dir, 'manifest.json')
+  writeAtomicFile(catalog, '[]')
+  expect(statSync(transcript).mode & 0o777).toBe(0o666 & ~process.umask())
+  expect(statSync(catalog).mode & 0o777).toBe(0o600 & ~process.umask())
+})
+
+it('publishes a transcript whose destination has a long filename', () => {
+  const path = join(dir, 'a'.repeat(210) + '_transcricao.txt')
+  expect(writeUniqueTextFile(path, 'texto')).toBe(path)
+  expect(readFileSync(path, 'utf8')).toBe('texto')
+  expect(readdirSync(dir)).toHaveLength(1)
 })

@@ -1,3 +1,4 @@
+import { flushPendingMemos } from '@/lib/memoAutosave'
 import { create } from 'zustand'
 import type {
   Code,
@@ -13,6 +14,8 @@ import type {
   DocumentRecord,
   DocumentWithText,
   Note,
+  OpenProjectResult,
+  ImportReport,
   ProjectMeta,
   RecentProjectWithStats,
   RenameProjectResult,
@@ -22,6 +25,7 @@ import type {
 } from '@shared/types'
 import type { HistoryState } from '@shared/ipc'
 import type { ProjectVersion } from '@shared/projectVersions'
+import type { PendingNote } from '@/lib/noteAutosave'
 
 interface AppState {
   project: ProjectMeta | null
@@ -39,9 +43,13 @@ interface AppState {
   renameProject: (path: string, name: string) => Promise<RenameProjectResult>
   trashProject: (path: string) => Promise<void>
   bootstrap: () => Promise<void>
+  newProjectPrompt: { source: string | null; initialName: string } | null
+  setNewProjectPrompt: (prompt: AppState['newProjectPrompt']) => void
+  saveNewProject: (name: string) => Promise<void>
   createProject: () => Promise<void>
   openProject: () => Promise<void>
   openRecent: (path: string) => Promise<void>
+  closingProject: boolean
   closeProject: () => Promise<void>
 
   refreshDocuments: () => Promise<void>
@@ -79,6 +87,7 @@ interface AppState {
   updateCollection: (input: UpdateCollectionInput) => Promise<void>
   deleteCollection: (id: number) => Promise<void>
   addCollectionMember: (collectionId: number, codeId: number) => Promise<void>
+  addCollectionMembers: (collectionId: number, codeIds: number[]) => Promise<void>
   removeCollectionMember: (collectionId: number, codeId: number) => Promise<void>
 
   refreshCodings: () => Promise<void>
@@ -108,7 +117,7 @@ interface AppState {
   updateNote: (input: UpdateNoteInput) => Promise<Note>
   deleteNote: (id: number) => Promise<void>
   notesFlush: (() => Promise<void>) | null
-  registerNotesFlush: (fn: (() => Promise<void>) | null) => void
+  pendingNote: PendingNote | null
   notasSujo: boolean
   setNotasSujo: (sujo: boolean) => void
   // Edição de texto do documento ainda não salva (#31). O TranscriptPanel
@@ -185,8 +194,16 @@ function resetNotesState(): Partial<AppState> {
     projectNotes: [],
     navigateNoteId: null,
     locateCodingId: null,
-    editorNoteId: null
+    editorNoteId: null,
+    pendingNote: null,
+    notesFlush: null
   }
+}
+
+async function finishMemo(state: AppState): Promise<boolean> {
+  if (state.sairDoMemo && !(await state.sairDoMemo())) return false
+  await flushPendingMemos()
+  return true
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -208,6 +225,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   locateSeq: 0,
   editorNoteId: null,
   notesFlush: null,
+  pendingNote: null,
   history: { canUndo: false, canRedo: false, undoLabel: null, redoLabel: null },
   versions: [],
 
@@ -236,33 +254,24 @@ export const useAppStore = create<AppState>((set, get) => ({
     await get().loadRecents()
   },
 
+  newProjectPrompt: null,
+  setNewProjectPrompt: (prompt) => set({ newProjectPrompt: prompt }),
   createProject: async () => {
-    if (get().sairDoMemo && !(await get().sairDoMemo!())) return
+    if (!(await finishMemo(get()))) return
     if (!(await get().podeSairDoTexto())) return
     await get().notesFlush?.()
-    const result = await window.api.project.create()
-    if (!result) return
-    set({
-      project: result.meta,
-      currentDocument: null,
-      codings: [],
-      documents: [],
-      codes: [],
-      collections: [],
-      collectionMembers: [],
-      ...resetNotesState()
-    })
-    await loadProjectData(set)
-    await get().loadRecents()
+    set({ newProjectPrompt: { source: null, initialName: 'projeto' } })
   },
 
-  // "Abrir projeto" aceita .liva e .qdpx (#41). O .qdpx vira um projeto novo e
-  // volta com o relatório da importação.
-  openProject: async () => {
-    if (get().sairDoMemo && !(await get().sairDoMemo!())) return
+  saveNewProject: async (name) => {
+    if (!(await finishMemo(get()))) return
     if (!(await get().podeSairDoTexto())) return
     await get().notesFlush?.()
-    const result = await window.api.project.open()
+    const prompt = get().newProjectPrompt
+    if (!prompt) return
+    const result: (OpenProjectResult & { report?: ImportReport }) | null = prompt.source
+      ? await window.api.project.importQdpx(prompt.source, name)
+      : await window.api.project.create(name)
     if (!result) return
     set({
       project: result.meta,
@@ -282,8 +291,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  openProject: async () => {
+    if (!(await finishMemo(get()))) return
+    if (!(await get().podeSairDoTexto())) return
+    await get().notesFlush?.()
+    const path = await window.api.project.pick()
+    if (!path) return
+    if (/\.qdpx$/i.test(path)) {
+      const filename = path.split(/[\\/]/).pop()!
+      set({ newProjectPrompt: { source: path, initialName: filename.replace(/\.qdpx$/i, '') } })
+      return
+    }
+    await get().openRecent(path)
+  },
+
   openRecent: async (path) => {
-    if (get().sairDoMemo && !(await get().sairDoMemo!())) return
+    if (!(await finishMemo(get()))) return
     if (!(await get().podeSairDoTexto())) return
     await get().notesFlush?.()
     const result = await window.api.project.openPath(path)
@@ -293,21 +316,29 @@ export const useAppStore = create<AppState>((set, get) => ({
     await get().loadRecents()
   },
 
+  closingProject: false,
   closeProject: async () => {
-    if (get().sairDoMemo && !(await get().sairDoMemo!())) return
+    if (!(await finishMemo(get()))) return
     if (!(await get().podeSairDoTexto())) return
-    await get().notesFlush?.()
-    await window.api.project.close()
-    set({
-      project: null,
-      documents: [],
-      currentDocument: null,
-      codes: [],
-      collections: [],
-      collectionMembers: [],
-      codings: [],
-      ...resetNotesState()
-    })
+    if (get().closingProject) return
+    set({ closingProject: true })
+    try {
+      await get().notesFlush?.()
+      await window.api.project.close()
+      get().setNotasSujo(false)
+      set({
+        project: null,
+        documents: [],
+        currentDocument: null,
+        codes: [],
+        collections: [],
+        collectionMembers: [],
+        codings: [],
+        ...resetNotesState()
+      })
+    } finally {
+      set({ closingProject: false })
+    }
     await get().loadRecents()
   },
 
@@ -382,6 +413,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     // O cascade do banco apaga as notas do documento, mas o store continuava
     // com elas: o contador somava notas inexistentes, a lista mostrava notas
     // fantasmas, e o editor podia ficar aberto sobre uma nota que ja nao existe.
+    if (get().pendingNote?.documentId === id) {
+      set({ pendingNote: null, notesFlush: null })
+      get().setNotasSujo(false)
+    }
     if (editada && editada.documentId === id) {
       get().setNotasSujo(false)
       set({ editorNoteId: null, navigateNoteId: null })
@@ -406,6 +441,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   createGroup: async (input) => {
     const group = await window.api.codes.createGroup(input)
     await get().refreshCodes()
+    if (input.collectionId != null) await get().refreshCollections()
     await get().refreshHistory()
     return group
   },
@@ -414,6 +450,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   createGroupFrom: async (input) => {
     const group = await window.api.codes.createGroupFrom(input)
     await get().refreshCodes()
+    if (input.collectionId != null) await get().refreshCollections()
     await get().refreshHistory()
     return group
   },
@@ -451,7 +488,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   undo: async () => {
-    if (get().sairDoMemo && !(await get().sairDoMemo!())) return null
+    if (!(await finishMemo(get()))) return null
     if (!(await get().podeSairDoTexto())) return null
     await get().notesFlush?.()
     const label = await window.api.history.undo()
@@ -460,7 +497,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   redo: async () => {
-    if (get().sairDoMemo && !(await get().sairDoMemo!())) return null
+    if (!(await finishMemo(get()))) return null
     if (!(await get().podeSairDoTexto())) return null
     await get().notesFlush?.()
     const label = await window.api.history.redo()
@@ -477,6 +514,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   createVersion: async (label) => {
+    if (!(await finishMemo(get()))) return
     if (!(await get().podeSairDoTexto())) return
     await get().notesFlush?.()
     await window.api.versions.create(label)
@@ -489,7 +527,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   restoreVersion: async (id) => {
-    if (get().sairDoMemo && !(await get().sairDoMemo!())) return
+    if (!(await finishMemo(get()))) return
     if (!(await get().podeSairDoTexto())) return
     await get().notesFlush?.()
     const result = await window.api.versions.restore(id)
@@ -543,6 +581,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   addCollectionMember: async (collectionId, codeId) => {
     await window.api.collections.addMember(collectionId, codeId)
+    await get().refreshCollections()
+    await get().refreshHistory()
+  },
+
+  addCollectionMembers: async (collectionId, codeIds) => {
+    await window.api.collections.addMembers(collectionId, codeIds)
     await get().refreshCollections()
     await get().refreshHistory()
   },
@@ -654,7 +698,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     await get().refreshHistory()
   },
 
-  registerNotesFlush: (fn) => set({ notesFlush: fn }),
   sairDoMemo: null,
   registerSairDoMemo: (fn) => set({ sairDoMemo: fn }),
   notasSujo: false,

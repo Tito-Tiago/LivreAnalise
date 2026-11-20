@@ -1,4 +1,4 @@
-import { type JSX, useEffect, useState } from 'react'
+import { type JSX, useState } from 'react'
 import { TopBar } from './TopBar'
 import { Sidebar } from './Sidebar'
 import { TranscriptPanel } from './TranscriptPanel'
@@ -7,37 +7,10 @@ import { CodeQuotationsDialog } from './CodeQuotationsDialog'
 import { UnsavedTextDialog } from './UnsavedTextDialog'
 import { useAppStore } from '@/stores/appStore'
 import type { CodeWithCount } from '@shared/types'
-import { mensagemDeErro } from '@/lib/erros'
 
 export function Workspace(): JSX.Element {
   const [viewCode, setViewCode] = useState<CodeWithCount | null>(null)
   const notesPanelOpen = useAppStore((s) => s.notesPanelOpen)
-  const podeSairDoTexto = useAppStore((s) => s.podeSairDoTexto)
-
-  // O main só pede isto quando há texto não salvo (#31).
-  useEffect(
-    () =>
-      window.api.app.onCloseRequested(async () => {
-        try {
-          const sairDoMemo = useAppStore.getState().sairDoMemo
-          if (sairDoMemo && !(await sairDoMemo())) {
-            window.api.app.cancelClose()
-            return
-          }
-          if (!(await podeSairDoTexto())) {
-            window.api.app.cancelClose()
-            return
-          }
-          await useAppStore.getState().notesFlush?.()
-          window.api.app.confirmClose()
-        } catch (e) {
-          window.api.app.cancelClose()
-          alert(mensagemDeErro(e, 'Não foi possível salvar as notas. A janela permanecerá aberta.'))
-        }
-      }),
-    [podeSairDoTexto]
-  )
-
   return (
     <div className="flex h-full flex-col">
       <TopBar />

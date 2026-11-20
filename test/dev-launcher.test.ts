@@ -58,3 +58,9 @@ it('reports a spawn failure and exits unsuccessfully', async () => {
   expect(error).toHaveBeenCalledWith('spawn failed')
   expect(process.exit).toHaveBeenCalledWith(1)
 })
+
+it('uses the preview command and passes the Linux sandbox option', async () => {
+  vi.spyOn(process, 'argv', 'get').mockReturnValue(['node', 'scripts/dev.mjs', 'preview'])
+  const [, args] = await launch('linux')
+  expect(args.slice(1)).toEqual(['preview', '--noSandbox'])
+})

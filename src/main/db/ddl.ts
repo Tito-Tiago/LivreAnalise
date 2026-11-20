@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS codes (
   color TEXT NOT NULL DEFAULT '#2563eb',
   description TEXT,
   memo TEXT NOT NULL DEFAULT '',
+  is_category INTEGER NOT NULL DEFAULT 0,
   parent_id INTEGER REFERENCES codes(id) ON DELETE CASCADE,
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))

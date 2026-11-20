@@ -14,7 +14,7 @@ vi.mock('../src/main/services/whisperModels', () => ({
   modelById: () => ({ file: 'tiny', sha256: 'hash' }), modelUrl: () => 'url'
 }))
 vi.mock('../src/main/services/whisperBinary', () => ({
-  assetForPlatform: () => null, modelPath: () => 'path', modelIsReady: () => false,
+  assetForPlatform: () => null, modelPath: () => 'path', modelIsDownloaded: () => false,
   resolveWhisperBinary: resolveBinary, downloadWhisperBinary: download
 }))
 vi.mock('../src/main/services/transcription', () => ({ ffmpegAvailable: () => true, TranscriptionRun: class {} }))

@@ -16,6 +16,7 @@ interface Props {
   title: string
   label: string
   initialValue?: string
+  submitLabel?: string
   onSubmit: (value: string) => void | Promise<void>
 }
 
@@ -25,6 +26,7 @@ export function SimplePromptDialog({
   title,
   label,
   initialValue,
+  submitLabel = 'Salvar',
   onSubmit
 }: Props): JSX.Element {
   const [value, setValue] = useState('')
@@ -75,7 +77,7 @@ export function SimplePromptDialog({
           <Button variant="ghost" disabled={saving} onClick={() => onOpenChange(false)}>
             Cancelar
           </Button>
-          <Button disabled={saving || !value.trim()} onClick={() => void submit()}>{saving ? 'Salvando…' : 'Salvar'}</Button>
+          <Button disabled={saving || !value.trim()} onClick={() => void submit()}>{saving ? 'Aguarde…' : submitLabel}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

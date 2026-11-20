@@ -14,6 +14,10 @@ material analisado é entrevista com participante identificável.
      codigos a esquerda e as etiquetas alinhadas na margem direita.
      Arraste o print aqui ao editar o README pelo GitHub. -->
 
+## Abrir um projeto da série 0.7.x na 0.8.0
+
+Ao abrir ou restaurar um projeto antigo, o aplicativo pede confirmação antes de converter o arquivo. Cancelar mantém o formato anterior. Ao confirmar, o LivreAnalise cria e verifica uma cópia no formato original na pasta `<nome>.liva-versoes`, ao lado do destino. Se a cópia falhar, a conversão é interrompida. Para voltar à versão anterior, copie o arquivo identificado como `premigracao` para outra pasta e abra essa cópia com o aplicativo antigo. Alterações feitas depois da conversão ficam no projeto atualizado.
+
 ## Download
 
 Os instaladores de cada versão ficam na
@@ -160,9 +164,9 @@ npm run dist:linux   # gera os instaladores localmente
 Electron + React + TypeScript, com SQLite via better-sqlite3 e Drizzle, e Tailwind na
 interface.
 
-No Linux, `npm run dev` passa `--no-sandbox` ao Electron antes da inicialização,
+No Linux, `npm run dev` e o preview local (`npm start`) passam `--no-sandbox` ao Electron antes da inicialização,
 evitando falhas do sandbox local (incluindo erros `No such process` em `/dev/shm`).
-Isso desabilita o sandbox **somente no launcher de desenvolvimento**; os aplicativos
+Isso desabilita o sandbox **nos launchers locais de desenvolvimento e preview**; os aplicativos
 empacotados não recebem essa opção. Use o modo de desenvolvimento apenas com
 conteúdo confiável. Windows e macOS mantêm o comportamento padrão.
 
@@ -195,9 +199,24 @@ porque uma cópia literal sai de sincronia sem ninguém perceber (foi o que
 aconteceu com o `APP_ORIGIN` do QDPX, que carimbou `0.1.0` em todo projeto
 exportado muito depois de a versão ter mudado).
 
-**Todo PR para a `master` incrementa a versão.** A tag da release vem daí.
-A CI recusa o PR que esquecer, e a publicação também recusa uma tag já existente:
-os instaladores de uma release publicada não são sobrescritos.
+**Todo PR para a `master` incrementa a versão.** A CI recusa um PR que mantenha a versão publicada. Antes do merge, o workflow Build pode ser executado manualmente com `workflow_dispatch`. Ele empacota Linux, Windows e macOS (Intel e Apple Silicon), confere os cinco instaladores e ensaia uma publicação interrompida. A execução manual usa permissão de leitura.
+
+No push para a `master`, a publicação cria um rascunho para o commit. Se o upload falhar, use **Re-run failed jobs** na mesma execução para reaproveitar os instaladores. O job confere os arquivos já enviados por tamanho e SHA-256, envia os pendentes e publica quando os cinco estão completos. Uma divergência de tag, commit ou conteúdo interrompe o job. Uma release publicada e idêntica já está concluída.
+
+Se a finalização do rascunho falhar por falta de permissão para criar a tag em
+um commit antigo que altera workflows, um mantenedor com permissão para
+atualizar workflows deve publicar a tag para o **SHA do run original**. Confira
+a versão em `git show "$SHA:package.json"` e o SHA de destino do rascunho antes
+de publicar a tag:
+
+```sh
+git push origin "$SHA:refs/tags/$TAG"
+```
+
+Use a tag do rascunho (por exemplo, `v0.7.1`) em `TAG`. O comando não usa
+`--force`. Se a tag já existir, confira seu commit e pare se houver divergência.
+Em seguida, use **Re-run failed jobs** no run original. O publicador confere
+se a tag aponta para o mesmo SHA antes de retomar os uploads e a finalização.
 
 Como escolher o incremento:
 

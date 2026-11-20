@@ -37,7 +37,8 @@ import type {
 export const IPC = {
   project: {
     create: 'project:create',
-    open: 'project:open',
+    pick: 'project:pick',
+    importQdpx: 'project:import-qdpx',
     openPath: 'project:openPath',
     current: 'project:current',
     close: 'project:close',
@@ -70,6 +71,7 @@ export const IPC = {
     members: 'collections:members',
     allMembers: 'collections:allMembers',
     addMember: 'collections:addMember',
+    addMembers: 'collections:addMembers',
     removeMember: 'collections:removeMember'
   },
   codings: {
@@ -140,8 +142,9 @@ export const IPC = {
 
 export interface Api {
   project: {
-    create: () => Promise<OpenProjectResult | null>
-    open: () => Promise<(OpenProjectResult & { report?: ImportReport }) | null>
+    create: (name: string) => Promise<OpenProjectResult | null>
+    pick: () => Promise<string | null>
+    importQdpx: (path: string, name: string) => Promise<(OpenProjectResult & { report: ImportReport }) | null>
     openPath: (path: string) => Promise<OpenProjectResult | null>
     current: () => Promise<ProjectMeta | null>
     close: () => Promise<void>
@@ -174,6 +177,7 @@ export interface Api {
     members: (collectionId: number) => Promise<number[]>
     allMembers: () => Promise<CollectionMember[]>
     addMember: (collectionId: number, codeId: number) => Promise<void>
+    addMembers: (collectionId: number, codeIds: number[]) => Promise<void>
     removeMember: (collectionId: number, codeId: number) => Promise<void>
   }
   codings: {

@@ -62,7 +62,6 @@ export function pushHistory(entry: HistoryEntry, agora: number = Date.now()): vo
     topo.redo = entry.redo
     topo.label = entry.label
     topo.at = agora
-    s.redo = []
     return
   }
   s.undo.push({ ...entry, at: agora })

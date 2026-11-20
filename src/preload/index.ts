@@ -3,8 +3,9 @@ import { IPC, type Api } from '@shared/ipc'
 
 const api: Api = {
   project: {
-    create: () => ipcRenderer.invoke(IPC.project.create),
-    open: () => ipcRenderer.invoke(IPC.project.open),
+    create: (name) => ipcRenderer.invoke(IPC.project.create, name),
+    pick: () => ipcRenderer.invoke(IPC.project.pick),
+    importQdpx: (path, name) => ipcRenderer.invoke(IPC.project.importQdpx, path, name),
     openPath: (path) => ipcRenderer.invoke(IPC.project.openPath, path),
     current: () => ipcRenderer.invoke(IPC.project.current),
     close: () => ipcRenderer.invoke(IPC.project.close),
@@ -39,6 +40,8 @@ const api: Api = {
     allMembers: () => ipcRenderer.invoke(IPC.collections.allMembers),
     addMember: (collectionId, codeId) =>
       ipcRenderer.invoke(IPC.collections.addMember, collectionId, codeId),
+    addMembers: (collectionId, codeIds) =>
+      ipcRenderer.invoke(IPC.collections.addMembers, collectionId, codeIds),
     removeMember: (collectionId, codeId) =>
       ipcRenderer.invoke(IPC.collections.removeMember, collectionId, codeId)
   },

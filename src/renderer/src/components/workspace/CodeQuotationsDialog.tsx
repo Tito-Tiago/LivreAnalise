@@ -21,7 +21,7 @@ interface Props {
   returnFocus?: FocusAnchor | null
 }
 
-export function CodeQuotationsDialog({ code, onOpenChange, returnFocus }: Props): JSX.Element {
+export function CodeQuotationsDialog({ code: requestedCode, onOpenChange, returnFocus }: Props): JSX.Element {
   const [quotes, setQuotes] = useState<CodingWithCode[]>([])
   const [somenteDocumento, setSomenteDocumento] = useState(false)
   const [atual, setAtual] = useState(0)
@@ -35,6 +35,12 @@ export function CodeQuotationsDialog({ code, onOpenChange, returnFocus }: Props)
   }
   const documents = useAppStore((s) => s.documents)
   const codes = useAppStore((s) => s.codes)
+  const requestedId = requestedCode?.id
+  const code = codes.find((item) => item.id === requestedId) ?? null
+
+  useEffect(() => {
+    if (requestedId != null && code == null) onOpenChange(false)
+  }, [requestedId, code, onOpenChange])
   const currentDocument = useAppStore((s) => s.currentDocument)
   const locateOccurrence = useAppStore((s) => s.locateOccurrence)
   const listaRef = useRef<HTMLDivElement>(null)
@@ -63,7 +69,10 @@ export function CodeQuotationsDialog({ code, onOpenChange, returnFocus }: Props)
   }, [code, somenteDocumento, termo])
 
   useEffect(() => {
-    if (!code) fecharBusca()
+    if (!code) {
+      fecharBusca()
+      setMemoOpen(false)
+    }
   }, [code])
 
   const docName = (id: number): string =>
@@ -109,14 +118,14 @@ export function CodeQuotationsDialog({ code, onOpenChange, returnFocus }: Props)
   }
 
   const onKeyDown = (e: React.KeyboardEvent): void => {
-    if (memoOpen || e.nativeEvent.isComposing || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
-    if (e.key === 'Enter' && e.target instanceof HTMLButtonElement) return
-    if (indice >= 0 && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+    if (memoOpen || e.defaultPrevented || e.nativeEvent.isComposing || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
+    const target = e.target as HTMLElement
+    const searching = buscaAberta && target.tagName === 'INPUT'
+    if (indice < 0) return
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault()
-      // No filtro, manter o foco no campo para continuar digitando. Fora
-      // dele, o foco acompanha o destaque e Enter ativa o botão correto.
-      andar(e.key === 'ArrowDown' ? 1 : -1, !(e.target instanceof HTMLInputElement))
-    } else if (e.key === 'Enter' && indice >= 0) {
+      andar(e.key === 'ArrowDown' ? 1 : -1, !searching)
+    } else if (searching && e.key === 'Enter') {
       e.preventDefault()
       void abrir(visiveis[indice])
     }
@@ -161,10 +170,10 @@ export function CodeQuotationsDialog({ code, onOpenChange, returnFocus }: Props)
           <Button size="sm" variant={memoOpen ? 'outline' : 'secondary'} onClick={() => {
             if (memoOpen) void useAppStore.getState().sairDoMemo?.()
           }}>Trechos</Button>
-          <Button size="sm" variant={memoOpen ? 'secondary' : 'outline'} onClick={() => setMemoOpen(true)}>Memo{(codes.find((c) => c.id === code?.id)?.memo ?? code?.memo) ? ' •' : ''}</Button>
+          <Button size="sm" variant={memoOpen ? 'secondary' : 'outline'} onClick={() => setMemoOpen(true)}>Memo{code?.memo ? ' •' : ''}</Button>
         </div>
         {memoOpen && code ? (
-          <MemoEditor target={{ id: code.id, name: code.name, kind: code.isCategory ? 'categoria' : 'código', memo: codes.find((c) => c.id === code.id)?.memo ?? code.memo ?? '' }} onClose={() => setMemoOpen(false)} showHint />
+          <MemoEditor target={{ id: code.id, name: code.name, kind: code.isCategory ? 'categoria' : 'código', memo: code.memo ?? '' }} onClose={() => setMemoOpen(false)} showHint />
         ) : <>
 
         <div className="flex min-w-0 items-start gap-3">

@@ -2,7 +2,8 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { modelIsReady, modelPath } from '../src/main/services/whisperBinary'
+import * as download from '../src/main/services/download'
+import { modelIsDownloaded, modelIsReady, modelPath } from '../src/main/services/whisperBinary'
 
 const state = vi.hoisted(() => ({ dir: '' }))
 vi.mock('electron', () => ({ app: { getPath: () => state.dir } }))
@@ -31,4 +32,22 @@ it('invalidates a successful verification when the cached file changes', async (
   const date = new Date(Date.now() + 2000)
   utimesSync(path, date, date)
   expect(await modelIsReady('test.bin')).toBe(false)
+})
+
+it('lists local models without reading the file and deduplicates verification', async () => {
+  writeFileSync(modelPath('test.bin'), 'abc')
+  const hash = vi.spyOn(download, 'hashFile')
+  try {
+    expect(modelIsDownloaded('test.bin')).toBe(true)
+    expect(hash).not.toHaveBeenCalled()
+    const cancel = new AbortController()
+    const first = modelIsReady('test.bin', cancel.signal)
+    const second = modelIsReady('test.bin')
+    cancel.abort()
+    await expect(first).rejects.toMatchObject({ name: 'AbortError' })
+    await expect(second).resolves.toBe(true)
+    expect(hash).toHaveBeenCalledTimes(1)
+  } finally {
+    hash.mockRestore()
+  }
 })

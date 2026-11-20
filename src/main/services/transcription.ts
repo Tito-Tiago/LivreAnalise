@@ -68,7 +68,7 @@ export class TranscriptionRun {
       }
       const model = modelById(options.modelId)
       if (!(await modelIsReady(model.file, signal))) {
-        throw new Error(`O modelo ${model.label} ainda não foi baixado`)
+        throw new Error(`O modelo ${model.label} está ausente ou não passou na verificação. Baixe o modelo novamente.`)
       }
       const binary = resolveWhisperBinary(options.binaryPath)
       if (!binary) {

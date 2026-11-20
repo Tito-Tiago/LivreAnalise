@@ -1,7 +1,7 @@
 import { spawnSync } from 'child_process'
 import { accessSync, chmodSync, constants, existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync } from 'fs'
 import { readFile, writeFile } from 'fs/promises'
-import { join } from 'path'
+import { join, relative } from 'path'
 import { app } from 'electron'
 import JSZip from 'jszip'
 import { downloadModel, WHISPER_MODELS, type DownloadProgress } from './whisperModels'
@@ -42,17 +42,24 @@ export function assetForPlatform(): BinaryAsset | null {
   return BINARY_ASSETS[`${process.platform}-${process.arch}`] ?? null
 }
 
-function findExecutable(root: string): string | null {
-  if (!existsSync(root)) return null
+function findExecutable(root: string, skip = new Set<string>(), requireAccess = true): string | null {
+  if (!existsSync(root) || !statSync(root).isDirectory()) return null
   const found = new Map<string, string>()
   const stack = [root]
   while (stack.length > 0) {
     const dir = stack.pop() as string
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, entry.name)
+      if (skip.has(full) || entry.name.startsWith('.install-')) continue
       if (entry.isDirectory()) stack.push(full)
-      else if (EXECUTABLES.includes(entry.name) && !found.has(entry.name)) {
-        found.set(entry.name, full)
+      else if (entry.isFile() && EXECUTABLES.includes(entry.name) && !found.has(entry.name)) {
+        try {
+          if (statSync(full).size === 0) continue
+          if (requireAccess) accessSync(full, process.platform === 'win32' ? constants.R_OK : constants.X_OK)
+          found.set(entry.name, full)
+        } catch {
+          // Uma extração antiga pode ter sido interrompida antes do chmod.
+        }
       }
     }
   }
@@ -61,6 +68,14 @@ function findExecutable(root: string): string | null {
     if (path) return path
   }
   return null
+}
+
+function findDownloadedBinary(): string | null {
+  const legacyDir = binaryDir()
+  const installed = join(legacyDir, 'installed')
+  // A 0.7.0 extraía no próprio diretório whisper. Use a instalação no lugar
+  // para manter as bibliotecas ao lado do executável e permitir voltar à 0.7.0.
+  return findExecutable(installed) ?? findExecutable(legacyDir, new Set([installed]))
 }
 
 // Ordem de resolucao: o caminho que o usuario informou, o binario embutido no
@@ -79,7 +94,7 @@ export function resolveWhisperBinary(configuredPath?: string | null): string | n
   const fromBundle = findExecutable(bundled)
   if (fromBundle) return fromBundle
 
-  const downloaded = findExecutable(join(binaryDir(), 'installed'))
+  const downloaded = findDownloadedBinary()
   if (downloaded) return downloaded
 
   for (const name of ['whisper-cli', 'whisper']) {
@@ -127,7 +142,7 @@ export async function downloadWhisperBinary(
   }
   const dir = binaryDir()
   const installed = join(dir, 'installed')
-  const existing = findExecutable(installed)
+  const existing = findDownloadedBinary()
   if (existing) return existing
   mkdirSync(dir, { recursive: true })
   const archive = join(dir, `whisper.${asset.archive}`)
@@ -136,11 +151,16 @@ export async function downloadWhisperBinary(
   try {
     await extract(archive, asset.archive, staging, signal)
     signal.throwIfAborted()
-    const executable = findExecutable(staging)
+    const executable = findExecutable(staging, undefined, false)
     if (!executable) throw new Error('O arquivo baixado não contém o executável do whisper')
     if (process.platform !== 'win32') chmodSync(executable, 0o755)
+    accessSync(executable, process.platform === 'win32' ? constants.R_OK : constants.X_OK)
+    // Outro download pode ter concluído durante a extração.
+    const ready = findDownloadedBinary()
+    if (ready) return ready
+    rmSync(installed, { recursive: true, force: true })
     renameSync(staging, installed)
-    return findExecutable(installed)!
+    return join(installed, relative(staging, executable))
   } finally {
     rmSync(staging, { recursive: true, force: true })
   }
@@ -154,24 +174,69 @@ export function modelPath(file: string): string {
   return join(modelsDir(), file)
 }
 
-const verifiedModels = new Map<string, { size: number; modified: number; sha256: string }>()
-
-export async function modelIsReady(file: string, signal?: AbortSignal): Promise<boolean> {
-  const path = modelPath(file)
-  const expected = WHISPER_MODELS.find((model) => model.file === file)?.sha256
-  if (!expected || !existsSync(path)) return false
+function modelFingerprint(path: string): string | null {
   try {
     const info = statSync(path)
-    if (!info.isFile() || info.size === 0) return false
-    const cached = verifiedModels.get(path)
-    if (cached && cached.size === info.size && cached.modified === info.mtimeMs) return cached.sha256 === expected
-    const sha256 = await hashFile(path, signal)
-    const after = statSync(path)
-    if (after.size !== info.size || after.mtimeMs !== info.mtimeMs) return false
-    verifiedModels.set(path, { size: info.size, modified: info.mtimeMs, sha256 })
-    return sha256 === expected
+    if (!info.isFile() || info.size === 0) return null
+    return JSON.stringify([info.dev, info.ino, info.size, info.mtimeMs, info.ctimeMs])
   } catch {
-    signal?.throwIfAborted()
-    return false
+    return null
+  }
+}
+
+const verifiedModels = new Map<string, { fingerprint: string; sha256: string }>()
+const verifyingModels = new Map<string, {
+  controller: AbortController
+  result: Promise<boolean>
+  users: number
+}>()
+
+// A listagem consulta só metadados. Um arquivo sem hash em cache é tratado
+// como baixado, e a transcrição verifica o conteúdo antes de usá-lo.
+export function modelIsDownloaded(file: string): boolean {
+  const path = modelPath(file)
+  const fingerprint = modelFingerprint(path)
+  const expected = WHISPER_MODELS.find((model) => model.file === file)?.sha256
+  if (!fingerprint || !expected) return false
+  const cached = verifiedModels.get(path)
+  return cached?.fingerprint !== fingerprint || cached.sha256 === expected
+}
+
+export async function modelIsReady(file: string, signal?: AbortSignal): Promise<boolean> {
+  signal?.throwIfAborted()
+  const path = modelPath(file)
+  const expected = WHISPER_MODELS.find((model) => model.file === file)?.sha256
+  const fingerprint = modelFingerprint(path)
+  if (!expected || !fingerprint) return false
+  const cached = verifiedModels.get(path)
+  if (cached?.fingerprint === fingerprint) return cached.sha256 === expected
+
+  const key = JSON.stringify([path, fingerprint, expected])
+  let pending = verifyingModels.get(key)
+  if (!pending || pending.controller.signal.aborted) {
+    const controller = new AbortController()
+    const result = hashFile(path, controller.signal).then((sha256) => {
+      if (modelFingerprint(path) !== fingerprint) return false
+      verifiedModels.set(path, { fingerprint, sha256 })
+      return sha256 === expected
+    }).catch(() => false).finally(() => {
+      if (verifyingModels.get(key)?.controller === controller) verifyingModels.delete(key)
+    })
+    pending = { controller, result, users: 0 }
+    verifyingModels.set(key, pending)
+  }
+
+  let cancel: (() => void) | undefined
+  pending.users++
+  try {
+    if (!signal) return await pending.result
+    const canceled = new Promise<never>((_resolve, reject) => {
+      cancel = () => reject(signal.reason)
+      signal.addEventListener('abort', cancel, { once: true })
+    })
+    return await Promise.race([pending.result, canceled])
+  } finally {
+    if (cancel) signal?.removeEventListener('abort', cancel)
+    if (--pending.users === 0 && signal?.aborted) pending.controller.abort()
   }
 }

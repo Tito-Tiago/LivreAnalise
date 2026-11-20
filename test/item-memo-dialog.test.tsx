@@ -30,6 +30,20 @@ describe('editor de memo', () => {
     expect(kind === 'grupo' ? updateCollection : updateCode).toHaveBeenCalledWith({ id: 1, memo: 'linha 1\nlinha 2' })
   })
 
+  it('recupera a edição após desmontar quando o primeiro salvamento falha', async () => {
+    const target: MemoTarget = { id: 7, name: 'Categoria', kind: 'categoria', memo: '' }
+    const first = render(<MemoDialog target={target} onClose={() => {}} />)
+    fireEvent.change(screen.getByLabelText('Texto do memo'), { target: { value: 'em andamento' } })
+    updateCode.mockRejectedValueOnce(new Error('disco cheio'))
+    await act(async () => first.unmount())
+    render(<MemoDialog target={target} onClose={() => {}} />)
+    expect((screen.getByLabelText('Texto do memo') as HTMLTextAreaElement).value).toBe('em andamento')
+    expect(screen.getByRole('status').textContent).toBe('Alterações não salvas')
+    await userEvent.click(screen.getByRole('button', { name: 'Voltar' }))
+    expect(updateCode).toHaveBeenCalledTimes(2)
+    expect(setMemoDirty).toHaveBeenLastCalledWith(false)
+  })
+
   it('salva automaticamente após uma pausa e continua aberto', async () => {
     const close = vi.fn()
     render(<MemoDialog target={{ id: 1, name: 'Nome', kind: 'código', memo: '' }} onClose={close} />)

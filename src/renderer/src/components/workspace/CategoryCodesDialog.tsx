@@ -25,12 +25,17 @@ interface Props {
 // Marcar põe o código dentro da categoria, desmarcar devolve ao 1º nível -- o
 // mesmo moveCodes do arrasto e do "Mover para categoria…". Só código sem filhos
 // entra: categoria dentro de categoria criaria o 3º nível.
-export function CategoryCodesDialog({ category, onOpenChange, returnFocus }: Props): JSX.Element {
+export function CategoryCodesDialog({ category: requested, onOpenChange, returnFocus }: Props): JSX.Element {
   const codes = useAppStore((s) => s.codes)
   const moveCodes = useAppStore((s) => s.moveCodes)
   const [filter, setFilter] = useState('')
   const [erro, setErro] = useState<string | null>(null)
   const [memoOpen, setMemoOpen] = useState(false)
+  const current = codes.find((item) => item.id === requested?.id)
+  const category = current ?? (memoOpen ? requested : null)
+  useEffect(() => {
+    if (requested && !current && !memoOpen) onOpenChange(false)
+  }, [requested, current, memoOpen, onOpenChange])
 
   useEffect(() => {
     if (category) {
@@ -81,7 +86,7 @@ export function CategoryCodesDialog({ category, onOpenChange, returnFocus }: Pro
           <Button size="sm" variant={memoOpen ? 'secondary' : 'outline'} onClick={() => setMemoOpen(true)}>Memo{(codes.find((c) => c.id === category?.id)?.memo ?? category?.memo) ? ' •' : ''}</Button>
         </div>
         {memoOpen && category ? (
-          <MemoEditor target={{ id: category.id, name: category.name, kind: 'categoria', memo: codes.find((c) => c.id === category.id)?.memo ?? category.memo ?? '' }} onClose={() => setMemoOpen(false)} showHint />
+          <MemoEditor target={{ id: category.id, name: category.name, kind: 'categoria', memo: codes.find((c) => c.id === category.id)?.memo ?? category.memo ?? '' }} onClose={() => setMemoOpen(false)} showHint unavailable={!current} />
         ) : <>
         <Input
           placeholder="Filtrar códigos..."

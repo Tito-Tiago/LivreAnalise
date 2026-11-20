@@ -93,6 +93,7 @@ type DropZone = 'before' | 'inside' | 'after'
 
 interface RowHit {
   id: number
+  collectionId?: number
   zone: DropZone
   key: string
   hasChildren: boolean
@@ -123,7 +124,7 @@ type DropIntent =
       anchorId: number | null
       position: 'before' | 'after' | 'end'
     }
-  | { kind: 'group'; codeIds: number[] }
+  | { kind: 'group'; codeIds: number[]; collectionId?: number }
 
 // Como o destino se apresenta na lista: cada um com seu próprio visual.
 // `same` é o noop: mesma posição de inserção, mas em tom neutro.
@@ -147,6 +148,7 @@ export function CodesPanel({ onViewCode, scrollPosition, createRequested, onCrea
   const updateCollection = useAppStore((s) => s.updateCollection)
   const deleteCollection = useAppStore((s) => s.deleteCollection)
   const addCollectionMember = useAppStore((s) => s.addCollectionMember)
+  const addCollectionMembers = useAppStore((s) => s.addCollectionMembers)
   const removeCollectionMember = useAppStore((s) => s.removeCollectionMember)
 
   const fullTree = useMemo(
@@ -204,7 +206,7 @@ export function CodesPanel({ onViewCode, scrollPosition, createRequested, onCrea
   const [notice, setNotice] = useState<string | null>(null)
   // Códigos que o arrasto juntou; o nome do grupo só é decidido no diálogo, para
   // que cancelar não deixe nada pela metade.
-  const [groupPrompt, setGroupPrompt] = useState<number[] | null>(null)
+  const [groupPrompt, setGroupPrompt] = useState<Extract<DropIntent, { kind: 'group' }> | null>(null)
   const anchorRef = useRef<number | null>(null)
   const expandTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const expandKeyRef = useRef<string | null>(null)
@@ -577,8 +579,10 @@ export function CodesPanel({ onViewCode, scrollPosition, createRequested, onCrea
         const zone: DropZone =
           rel < 0.25 ? 'before' : rel > 0.75 ? 'after' : 'inside'
         const id = Number(rowEl.dataset.codeRow)
+        const collection = rowEl.closest<HTMLElement>('[data-code-collection]')
         return {
           id,
+          collectionId: collection ? Number(collection.dataset.codeCollection) : undefined,
           zone,
           key: rowEl.dataset.codeKey ?? '',
           hasChildren: rowEl.dataset.codeChildren === '1',
@@ -659,7 +663,7 @@ export function CodesPanel({ onViewCode, scrollPosition, createRequested, onCrea
     // impossível de agrupar, e dizer "destino inválido" é honesto.
     if (ids.length > 1 && ids.includes(hit.id)) return { kind: 'invalid' }
     if (members.some((id) => isGroup(id))) return { kind: 'invalid' }
-    return { kind: 'group', codeIds: members }
+    return { kind: 'group', codeIds: members, collectionId: hit.collectionId }
   }
 
   const intentLabel = (intent: DropIntent, hit: DropHit): string => {
@@ -841,7 +845,7 @@ export function CodesPanel({ onViewCode, scrollPosition, createRequested, onCrea
       }
       if (intent.kind === 'group') {
         cleanupDrag()
-        setGroupPrompt(intent.codeIds)
+        setGroupPrompt(intent)
         return
       }
       if (intent.kind === 'collection') {
@@ -907,14 +911,12 @@ export function CodesPanel({ onViewCode, scrollPosition, createRequested, onCrea
     } else if (prompt.kind === 'renameCollection' || prompt.kind === 'renameCategory') {
       return
     } else if (prompt.kind === 'groupFromCode') {
-      const category = await createGroup({
+      await createGroup({
         name,
         color: prompt.code.color,
-        codeId: prompt.code.id
+        codeId: prompt.code.id,
+        collectionId: prompt.collectionId
       })
-      if (prompt.collectionId != null) {
-        await addCollectionMember(prompt.collectionId, category.id)
-      }
     } else {
       const collection = await createCollection({ name })
       await addCollectionMember(collection.id, prompt.code.id)
@@ -932,12 +934,13 @@ export function CodesPanel({ onViewCode, scrollPosition, createRequested, onCrea
   // qual foram soltos, com o nome que o usuário escolher.
   const submitGroupPrompt = async (name: string): Promise<void> => {
     if (!groupPrompt) return
-    const members = [...groupPrompt]
+    const { codeIds, collectionId } = groupPrompt
     try {
       await createGroupFrom({
         name,
-        color: codes.find((c) => c.id === members[0])?.color ?? randomColor(),
-        codeIds: members
+        color: codes.find((c) => c.id === codeIds[0])?.color ?? randomColor(),
+        codeIds,
+        collectionId
       })
       setSelected(new Set())
       anchorRef.current = null
@@ -985,12 +988,16 @@ export function CodesPanel({ onViewCode, scrollPosition, createRequested, onCrea
       const members = new Set(collectionMembersRef.current
         .filter((member) => member.collectionId === collectionId)
         .map((member) => member.codeId))
-      for (const id of ids) {
-        const code = codesRef.current.find((item) => item.id === id)
-        if (!code || members.has(id) || (code.parentId != null && members.has(code.parentId))) continue
-        await addCollectionMember(collectionId, id)
-        members.add(id)
-      }
+      const selectedIds = new Set(ids)
+      const codesById = new Map(codesRef.current.map((code) => [code.id, code]))
+      const toAdd = [...selectedIds].filter((id) => {
+        const code = codesById.get(id)
+        if (!code || members.has(id)) return false
+        const parent = code.parentId
+        return parent == null || (!members.has(parent) && !selectedIds.has(parent))
+      })
+      if (toAdd.length === 1) await addCollectionMember(collectionId, toAdd[0])
+      else if (toAdd.length > 1) await addCollectionMembers(collectionId, toAdd)
       setSelected(new Set())
       anchorRef.current = null
     } catch (err) {
@@ -1326,6 +1333,7 @@ export function CodesPanel({ onViewCode, scrollPosition, createRequested, onCrea
             <Button
               size="sm"
               variant="outline"
+              className="shrink-0"
               onClick={() => {
                 setMoveFilter('')
                 setMoveError(null)
@@ -1337,6 +1345,7 @@ export function CodesPanel({ onViewCode, scrollPosition, createRequested, onCrea
             <Button
               size="sm"
               variant="ghost"
+              className="shrink-0"
               onClick={() => {
                 setSelected(new Set())
                 anchorRef.current = null
@@ -1380,7 +1389,7 @@ export function CodesPanel({ onViewCode, scrollPosition, createRequested, onCrea
                   const key = `col-${node.collection.id}`
                   const isCollapsed = recolhido(key)
                   return (
-                    <li key={key} {...rowProps(key, node.collection.name, node.children.length > 0)}>
+                    <li key={key} data-code-collection={node.collection.id} {...rowProps(key, node.collection.name, node.children.length > 0)}>
                       <ContextMenu>
                       <ContextMenuTrigger asChild>
                       <div data-collection-row={node.collection.id} className={`group flex items-center gap-1 rounded-md px-1 py-1 text-sm hover:bg-accent/50 ${dropCollection === node.collection.id ? `code-drop-inside ${dropKind === 'same' ? 'code-drop-same' : ''}` : ''}`}>
@@ -1571,7 +1580,7 @@ export function CodesPanel({ onViewCode, scrollPosition, createRequested, onCrea
       <SimplePromptDialog
         open={groupPrompt !== null}
         onOpenChange={(o) => !o && setGroupPrompt(null)}
-        title={`Nova categoria com ${groupNames(groupPrompt)}`}
+        title={`Nova categoria com ${groupNames(groupPrompt?.codeIds ?? null)}`}
         label="Nome da categoria"
         initialValue=""
         onSubmit={submitGroupPrompt}

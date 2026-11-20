@@ -33,7 +33,6 @@ export function Workspace(): JSX.Element {
   const documents = useAppStore((s) => s.documents)
   const busy = useAppStore((s) => s.busy)
   const history = useAppStore((s) => s.history)
-  const podeSairDoTexto = useAppStore((s) => s.podeSairDoTexto)
 
   const moveTo = (name: string, remember = true): boolean => {
     const area = workspaceRef.current?.querySelector<HTMLElement>(`[data-workspace-area="${name}"]`)
@@ -152,40 +151,6 @@ export function Workspace(): JSX.Element {
       window.removeEventListener('keydown', onKey)
     }
   }, [actions])
-
-  // O main pede isto quando há edição ou renomeação ainda não salva.
-  useEffect(
-    () =>
-      window.api.app.onCloseRequested(async () => {
-        try {
-          const sairDaRenomeacao = useAppStore.getState().sairDaRenomeacao
-          if (sairDaRenomeacao && !(await sairDaRenomeacao())) {
-            window.api.app.cancelClose()
-            return
-          }
-          const sairDoCodigo = useAppStore.getState().sairDoCodigo
-          if (sairDoCodigo && !(await sairDoCodigo())) {
-            window.api.app.cancelClose()
-            return
-          }
-          const sairDoMemo = useAppStore.getState().sairDoMemo
-          if (sairDoMemo && !(await sairDoMemo())) {
-            window.api.app.cancelClose()
-            return
-          }
-          if (!(await podeSairDoTexto())) {
-            window.api.app.cancelClose()
-            return
-          }
-          await useAppStore.getState().notesFlush?.()
-          window.api.app.confirmClose()
-        } catch (e) {
-          window.api.app.cancelClose()
-          alert(mensagemDeErro(e, 'Não foi possível salvar as notas. A janela permanecerá aberta.'))
-        }
-      }),
-    [podeSairDoTexto]
-  )
 
   const closeSurface = (id: CommandId | null): void => {
     const origin = surfaceOrigin.current

@@ -16,7 +16,7 @@ import {
 import {
   assetForPlatform,
   downloadWhisperBinary,
-  modelIsReady,
+  modelIsDownloaded,
   modelPath,
   resolveWhisperBinary
 } from '../services/whisperBinary'
@@ -71,12 +71,12 @@ export function registerTranscriptionHandlers(): void {
   }))
 
   ipcMain.handle(IPC.transcription.models, async (): Promise<TranscriptionModel[]> =>
-    Promise.all(WHISPER_MODELS.map(async (model) => ({
+    WHISPER_MODELS.map((model) => ({
       id: model.id,
       label: model.label,
       approxBytes: model.approxBytes,
-      ready: await modelIsReady(model.file)
-    })))
+      ready: modelIsDownloaded(model.file)
+    }))
   )
 
   ipcMain.handle(IPC.transcription.pickMedia, async (): Promise<string | null> => {

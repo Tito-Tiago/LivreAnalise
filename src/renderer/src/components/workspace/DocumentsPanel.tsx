@@ -1,4 +1,4 @@
-import { type JSX, type RefObject, useEffect, useRef, useState } from 'react'
+import { type JSX, type RefObject, useContext, useEffect, useRef, useState } from 'react'
 import { FileText, FilePlus, MoreVertical, Pencil, Trash2 } from 'lucide-react'
 import { useAppStore } from '@/stores/appStore'
 import { Button } from '@/components/ui/button'
@@ -15,8 +15,21 @@ import { SearchButton, SearchField } from './SearchField'
 import type { DocumentRecord } from '@shared/types'
 import { useAsyncAction } from '@/lib/useAsyncAction'
 import { useScrollMemory, type ScrollPosition } from '@/lib/useScrollMemory'
+import { hasKeyboardLayer, isTypingTarget, matchesCommand } from '@/lib/keyboard'
+import { WorkspaceActionsContext } from '@/lib/workspaceActions'
 
-export function DocumentsPanel({ scrollPosition }: { scrollPosition?: RefObject<ScrollPosition> } = {}): JSX.Element {
+export function documentToRename(origin: EventTarget | null): DocumentRecord | undefined {
+  const { documents, currentDocument } = useAppStore.getState()
+  const focusedId = origin instanceof HTMLElement ? origin.closest<HTMLElement>('[data-document-id]')?.dataset.documentId : undefined
+  return documents.find((doc) => doc.id === (focusedId ? Number(focusedId) : currentDocument?.id))
+}
+
+export function DocumentsPanel({ scrollPosition, renameRequested, onRenameHandled }: {
+  scrollPosition?: RefObject<ScrollPosition>
+  renameRequested?: DocumentRecord | null
+  onRenameHandled?: () => void
+} = {}): JSX.Element {
+  const workspace = useContext(WorkspaceActionsContext)
   const scrollRef = useRef<HTMLDivElement>(null)
   useScrollMemory(scrollRef, scrollPosition)
   const documents = useAppStore((s) => s.documents)
@@ -58,20 +71,24 @@ export function DocumentsPanel({ scrollPosition }: { scrollPosition?: RefObject<
   }, [renaming])
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== 'F2' || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.repeat) return
-      const target = e.target instanceof HTMLElement ? e.target : null
-      if (target?.isContentEditable || target?.closest('input, textarea, select, [contenteditable="true"]')) return
-      if (document.querySelector('[role="dialog"], [role="menu"]')) return
-      const focusedId = target?.closest<HTMLElement>('[data-document-id]')?.dataset.documentId
-      const doc = documents.find((d) => d.id === (focusedId ? Number(focusedId) : currentDocument?.id))
+    if (!renameRequested) return
+    void startRenaming(renameRequested)
+    onRenameHandled?.()
+  }, [renameRequested, onRenameHandled])
+
+  useEffect(() => {
+    if (workspace && onRenameHandled) return
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented || event.isComposing || event.repeat ||
+          !matchesCommand(event, 'renameDocument') || isTypingTarget(event.target) || hasKeyboardLayer()) return
+      const doc = documentToRename(event.target)
       if (!doc) return
-      e.preventDefault()
+      event.preventDefault()
       void startRenaming(doc)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [documents, currentDocument?.id])
+  }, [workspace, onRenameHandled])
 
   return (
     <div className="flex h-full flex-col">

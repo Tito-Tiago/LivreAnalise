@@ -69,7 +69,7 @@ import { captureFocus, hasKeyboardLayer, matchesCommand, type FocusAnchor } from
 import { useWorkspaceActions } from '@/lib/workspaceActions'
 
 interface Props {
-  onViewCode: (code: CodeWithCount | null) => void
+  onViewCode: (code: CodeWithCount | null, origin?: HTMLElement | null) => void
   scrollPosition?: RefObject<ScrollPosition>
   createRequested?: boolean
   onCreateRequested?: () => void
@@ -307,7 +307,7 @@ export function CodesPanel({ onViewCode, scrollPosition, createRequested, onCrea
   // Clique simples seleciona e abre; Ctrl/Cmd alterna e Shift faz intervalo,
   // ambos sem abrir os trechos. Categoria não tem trecho próprio: o clique
   // nela abre a escolha dos códigos que ela reúne.
-  const applySelect = (mods: SelectModifiers, code: CodeWithCount): void => {
+  const applySelect = (mods: SelectModifiers, code: CodeWithCount, origin?: HTMLElement | null): void => {
     if (mods.ctrlKey || mods.metaKey) {
       toggleSelect(code.id)
       return
@@ -318,8 +318,10 @@ export function CodesPanel({ onViewCode, scrollPosition, createRequested, onCrea
     }
     anchorRef.current = code.id
     setSelected(new Set([code.id]))
-    if (isGroup(code.id)) setCodesCategory(code)
-    else onViewCode(code)
+    if (isGroup(code.id)) {
+      detailsOrigin.current = captureFocus(origin ?? document.activeElement)
+      setCodesCategory(code)
+    } else onViewCode(code, origin)
   }
 
   // Aviso curto (destino inválido, por exemplo) some sozinho.
@@ -384,9 +386,8 @@ export function CodesPanel({ onViewCode, scrollPosition, createRequested, onCrea
         break
       case 'Enter':
         if (!event.repeat) {
-          detailsOrigin.current = captureFocus(event.currentTarget)
-          if (row.code) applySelect({ ctrlKey: false, metaKey: false, shiftKey: false }, row.code)
-          else if (row.collection) setMembersCollection(row.collection)
+          if (row.code) applySelect({ ctrlKey: false, metaKey: false, shiftKey: false }, row.code, event.currentTarget)
+          else if (row.collection) openCollectionDetails(row.collection, key)
         }
         break
       case 'Escape':
@@ -438,6 +439,23 @@ export function CodesPanel({ onViewCode, scrollPosition, createRequested, onCrea
     const key = origin?.closest<HTMLElement>('[data-tree-key]')?.dataset.treeKey
     return key ? visibleByKey.get(key) : undefined
   }
+  const openCollectionDetails = (collection: Collection, key: string): void => {
+    detailsOrigin.current = captureFocus(treeRows.current.get(key) ?? null)
+    setMembersCollection(collection)
+  }
+
+  const editTreeItem = (row: VisibleTreeRow): void => {
+    codeDialogOrigin.current = captureFocus(treeRows.current.get(row.key) ?? null)
+    if (row.collection) setPrompt({ kind: 'renameCollection', collection: row.collection })
+    else if (row.code && isGroup(row.code.id)) setPrompt({ kind: 'renameCategory', code: row.code })
+    else if (row.code) setDialogState({ mode: 'edit', code: row.code })
+  }
+
+  const editRow = (key: string): void => {
+    const row = visibleByKey.get(key)
+    if (row) editTreeItem(row)
+  }
+
   useWorkspaceActions({
     openMemo: {
       unavailable: (origin) => rowAt(origin) ? undefined : 'Foque um código, categoria ou grupo na árvore.',
@@ -451,10 +469,7 @@ export function CodesPanel({ onViewCode, scrollPosition, createRequested, onCrea
       unavailable: (origin) => rowAt(origin) ? undefined : 'Foque um código, categoria ou grupo na árvore.',
       run: (origin) => {
         const row = rowAt(origin)
-        codeDialogOrigin.current = origin ? captureFocus(origin) : null
-        if (row?.collection) setPrompt({ kind: 'renameCollection', collection: row.collection })
-        else if (row?.code && isGroup(row.code.id)) setPrompt({ kind: 'renameCategory', code: row.code })
-        else if (row?.code) setDialogState({ mode: 'edit', code: row.code })
+        if (row) editTreeItem(row)
       }
     }
   })
@@ -821,7 +836,7 @@ export function CodesPanel({ onViewCode, scrollPosition, createRequested, onCrea
         )
         const upId = upRow ? Number(upRow.dataset.codeRow) : null
         if (upId === pending.code.id)
-          liveRef.current.applySelect(pending.mods, pending.code)
+          liveRef.current.applySelect(pending.mods, pending.code, upRow?.closest<HTMLElement>('[data-tree-key]'))
         return
       }
       const hit = hitZone(e.clientX, e.clientY)
@@ -1126,7 +1141,7 @@ export function CodesPanel({ onViewCode, scrollPosition, createRequested, onCrea
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" onCloseAutoFocus={(event) => closeTreeMenu(event, key)}>
                   <DropdownMenuItem onClick={() => openMemo({ id: node.code.id, name: node.code.name, kind: isCategory ? 'categoria' : 'código', memo: node.code.memo ?? '' }, treeRows.current.get(key) ?? null)}>Abrir memo</DropdownMenuItem>
-                  {(!isCategory || node.code.usageCount > 0) && <DropdownMenuItem onClick={() => onViewCode(node.code)}>
+                  {(!isCategory || node.code.usageCount > 0) && <DropdownMenuItem onClick={() => onViewCode(node.code, treeRows.current.get(key))}>
                     <List className="h-4 w-4" /> Ver trechos
                   </DropdownMenuItem>}
                   <DropdownMenuItem
@@ -1189,11 +1204,7 @@ export function CodesPanel({ onViewCode, scrollPosition, createRequested, onCrea
                   {/* Categoria só se renomeia: cor e descrição são do código,
                       que é o que recebe citação. */}
                   <DropdownMenuItem
-                    onClick={() =>
-                      isCategory
-                        ? setPrompt({ kind: 'renameCategory', code: node.code })
-                        : setDialogState({ mode: 'edit', code: node.code })
-                    }
+                    onSelect={() => editRow(key)}
                   >
                     <Pencil className="h-4 w-4" />{' '}
                     {isCategory ? 'Renomear' : 'Editar'}
@@ -1220,11 +1231,7 @@ export function CodesPanel({ onViewCode, scrollPosition, createRequested, onCrea
           </ContextMenuTrigger>
           <ContextMenuContent>
             <ContextMenuItem
-              onSelect={() =>
-                isCategory
-                  ? setPrompt({ kind: 'renameCategory', code: node.code })
-                  : setDialogState({ mode: 'edit', code: node.code })
-              }
+              onSelect={() => editRow(key)}
             >
               <Pencil className="h-4 w-4" /> {isCategory ? 'Renomear categoria' : 'Editar código'}
             </ContextMenuItem>
@@ -1409,7 +1416,7 @@ export function CodesPanel({ onViewCode, scrollPosition, createRequested, onCrea
                         <button
                           tabIndex={-1}
                           className="flex min-w-0 flex-1 items-center gap-2 text-left font-medium"
-                          onClick={() => setMembersCollection(node.collection)}
+                          onClick={() => openCollectionDetails(node.collection, key)}
                         >
                           <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
                           <span className="truncate">
@@ -1426,19 +1433,12 @@ export function CodesPanel({ onViewCode, scrollPosition, createRequested, onCrea
                           <DropdownMenuContent align="end" onCloseAutoFocus={(event) => closeTreeMenu(event, key)}>
                             <DropdownMenuItem onClick={() => openMemo({ id: node.collection.id, name: node.collection.name, kind: 'grupo', memo: node.collection.memo ?? '' }, treeRows.current.get(key) ?? null)}>Abrir memo</DropdownMenuItem>
                             <DropdownMenuItem
-                              onClick={() =>
-                                setMembersCollection(node.collection)
-                              }
+                              onSelect={() => openCollectionDetails(node.collection, key)}
                             >
                               <Users className="h-4 w-4" /> Gerenciar códigos
                             </DropdownMenuItem>
                             <DropdownMenuItem
-                              onClick={() =>
-                                setPrompt({
-                                  kind: 'renameCollection',
-                                  collection: node.collection
-                                })
-                              }
+                              onSelect={() => editRow(key)}
                             >
                               <Pencil className="h-4 w-4" /> Renomear
                             </DropdownMenuItem>

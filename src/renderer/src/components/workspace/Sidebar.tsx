@@ -1,9 +1,9 @@
 import { type JSX, useCallback, useEffect, useRef, useState } from 'react'
 import { FileText, Tags } from 'lucide-react'
-import { DocumentsPanel } from './DocumentsPanel'
+import { DocumentsPanel, documentToRename } from './DocumentsPanel'
 import { CodesPanel } from './CodesPanel'
 import { cn } from '@/lib/utils'
-import type { CodeWithCount } from '@shared/types'
+import type { CodeWithCount, DocumentRecord } from '@shared/types'
 import { useAppStore } from '@/stores/appStore'
 import { useWorkspaceActions } from '@/lib/workspaceActions'
 
@@ -17,12 +17,14 @@ const WIDTH_KEY = 'sidebarWidth'
 interface Props {
   // null fecha o detalhe: o arrasto usa isso para não deixar painel nenhum em
   // cima da lista enquanto o código está em movimento.
-  onViewCode: (code: CodeWithCount | null) => void
+  onViewCode: (code: CodeWithCount | null, origin?: HTMLElement | null) => void
 }
 
 export function Sidebar({ onViewCode }: Props): JSX.Element {
   const [tab, setTab] = useState<Tab>('documents')
   const [createRequested, requestCreate] = useState(false)
+  const [renameRequested, requestRename] = useState<DocumentRecord | null>(null)
+  const finishRenameRequest = useCallback(() => requestRename(null), [])
   const documentsScroll = useRef({ top: 0, left: 0 })
   const codesScroll = useRef({ top: 0, left: 0 })
   const tabButtons = useRef(new Map<Tab, HTMLButtonElement>())
@@ -59,7 +61,14 @@ export function Sidebar({ onViewCode }: Props): JSX.Element {
     return true
   }
   useWorkspaceActions({
-    newCode: { run: async () => { if (await changeTab('codes')) requestCreate(true) } }
+    newCode: { run: async () => { if (await changeTab('codes')) requestCreate(true) } },
+    renameDocument: {
+      unavailable: (origin) => documentToRename(origin) ? undefined : 'Abra ou foque um documento primeiro.',
+      run: async (origin) => {
+        const document = documentToRename(origin)
+        if (document && await changeTab('documents')) requestRename(document)
+      }
+    }
   })
 
   const onMouseMove = useCallback((e: MouseEvent) => {
@@ -123,7 +132,7 @@ export function Sidebar({ onViewCode }: Props): JSX.Element {
           ))}
         </div>
         <div className="min-h-0 flex-1">
-          {tab === 'documents' && <DocumentsPanel scrollPosition={documentsScroll} />}
+          {tab === 'documents' && <DocumentsPanel scrollPosition={documentsScroll} renameRequested={renameRequested} onRenameHandled={finishRenameRequest} />}
           {tab === 'codes' && <CodesPanel onViewCode={onViewCode} scrollPosition={codesScroll}
             createRequested={createRequested} onCreateRequested={() => requestCreate(false)} />}
         </div>

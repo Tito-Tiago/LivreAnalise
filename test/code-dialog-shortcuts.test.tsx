@@ -34,7 +34,7 @@ beforeEach(async () => {
     collections: { list: () => [], allMembers: () => [] },
     notes: { listProject: () => [] },
     history: { state: history.historyState, undo, redo: history.historyRedo },
-    app: { setCodeDirty: vi.fn() },
+    app: { setCodeDirty: vi.fn(), onCloseRequested: () => () => {} },
     view: { onAction: () => () => {} }
   } })
   useThemeStore.setState({ init: vi.fn() })

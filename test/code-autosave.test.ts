@@ -65,4 +65,14 @@ describe('autosave de código', () => {
     await pending
     expect(write).toHaveBeenLastCalledWith(initial)
   })
+
+  it('preserva os espaços de campos importados que não foram editados', async () => {
+    const imported = { name: ' Nome importado ', color: '#111', description: ' Descrição importada ' }
+    const write = vi.fn().mockResolvedValue(undefined)
+    const saver = createCodeSaver(imported, write)
+    saver.change({ ...imported, color: '#222' })
+    await saver.flush()
+    expect(write).toHaveBeenCalledWith({ ...imported, color: '#222' })
+  })
+
 })

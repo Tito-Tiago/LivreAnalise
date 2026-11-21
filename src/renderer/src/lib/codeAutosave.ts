@@ -15,7 +15,8 @@ export function createCodeSaver(initial: CodeDialogValue, write: (draft: CodeDia
   flush: () => Promise<void>
 } {
   let draft = initial
-  let saved = normalizeCodeDraft(initial)
+  let lastDraft = initial
+  let saved = initial
   let pending: Promise<void> | null = null
   return {
     change: (next) => { draft = next },
@@ -23,10 +24,17 @@ export function createCodeSaver(initial: CodeDialogValue, write: (draft: CodeDia
       if (pending) return pending
       pending = (async () => {
         while (true) {
-          const next = normalizeCodeDraft(draft)
-          if (!next.name) throw new Error('O nome do código não pode ficar vazio.')
+          const currentDraft = draft
+          const normalized = normalizeCodeDraft(currentDraft)
+          if (!normalized.name) throw new Error('O nome do código não pode ficar vazio.')
+          const next: CodeDialogValue = {
+            name: currentDraft.name === lastDraft.name ? saved.name : normalized.name,
+            color: currentDraft.color,
+            description: currentDraft.description === lastDraft.description ? saved.description : normalized.description
+          }
           if (next.name === saved.name && next.color === saved.color && next.description === saved.description) return
           await write(next)
+          lastDraft = currentDraft
           saved = next
         }
       })().finally(() => { pending = null })

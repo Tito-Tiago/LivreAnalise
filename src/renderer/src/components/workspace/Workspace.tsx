@@ -162,8 +162,8 @@ export function Workspace(): JSX.Element {
       execute(id, action, origin?.element ?? null)
     }
   }
-  const showCode = (code: CodeWithCount | null): void => {
-    if (code) codeOrigin.current = captureFocus()
+  const showCode = (code: CodeWithCount | null, origin?: HTMLElement | null): void => {
+    if (code) codeOrigin.current = captureFocus(origin ?? document.activeElement)
     setViewCode(code)
   }
 

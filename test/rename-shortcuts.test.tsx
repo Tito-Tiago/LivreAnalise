@@ -35,7 +35,7 @@ beforeEach(() => {
     codings: { listByDocument: repos.listCodingsByDocument },
     notes: { listProject: repos.listProjectNotes, listByDocument: repos.listNotesByDocument },
     history: { state: history.historyState, undo: history.historyUndo, redo: history.historyRedo },
-    app: { setNameDirty: vi.fn() }, view: { onAction: () => () => {} }
+    app: { setNameDirty: vi.fn(), onCloseRequested: () => () => {} }, view: { onAction: () => () => {} }
   } })
   useThemeStore.setState({ init: vi.fn() })
   useZoomStore.setState({ init: vi.fn() })

@@ -204,6 +204,18 @@ function resetNotesState(): Partial<AppState> {
   }
 }
 
+let documentSelection = 0
+
+async function loadDocument(id: number) {
+  const currentDocument = await window.api.documents.get(id)
+  if (!currentDocument) return null
+  const [codings, documentNotes] = await Promise.all([
+    window.api.codings.listByDocument(id),
+    window.api.notes.listByDocument(id)
+  ])
+  return { currentDocument, codings, documentNotes }
+}
+
 async function finishProjectEditors(state: AppState): Promise<boolean> {
   if (state.sairDaRenomeacao && !(await state.sairDaRenomeacao())) return false
   if (state.sairDoCodigo && !(await state.sairDoCodigo())) return false
@@ -364,23 +376,20 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   selectDocument: async (id) => {
-    if (get().sairDaRenomeacao && !(await get().sairDaRenomeacao!())) return false
-    // O salvar do próprio texto chama selectDocument no mesmo documento para
-    // recarregar; só trocar de documento é sair da edição.
+    const selection = ++documentSelection
+    const project = get().project
+    const stillRequested = () =>
+      selection === documentSelection && get().project === project && !get().closingProject
+    const leave = get().sairDaRenomeacao
+    if (leave && !(await leave())) return false
+    if (!stillRequested()) return false
     if (get().currentDocument?.id !== id && !(await get().podeSairDoTexto())) return false
     await get().notesFlush?.()
-    const doc = await window.api.documents.get(id)
-    // Documento apagado: manter o que esta aberto. Publicar `null` aqui
-    // esvaziava a tela e fazia a pessoa perder o documento que estava lendo,
-    // por causa de um clique num item de lista desatualizada.
-    if (!doc) return false
-    const [codings, documentNotes] = await Promise.all([
-      window.api.codings.listByDocument(doc.id),
-      window.api.notes.listByDocument(doc.id)
-    ])
-    // Publica tudo junto: medir o texto novo com as citações do documento
-    // anterior pode criar colunas extras e deixar a faixa de códigos enorme.
-    set({ currentDocument: doc, codings, documentNotes, navigateNoteId: null, editorNoteId: null })
+    if (!stillRequested()) return false
+    const document = await loadDocument(id)
+    // Documento, citações e notas precisam chegar juntos, na ordem dos pedidos.
+    if (!document || !stillRequested()) return false
+    set({ ...document, navigateNoteId: null, editorNoteId: null })
     return true
   },
 
@@ -395,12 +404,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   updateDocumentText: async (id, text) => {
+    const project = get().project
     await get().notesFlush?.()
     await window.api.documents.updateText(id, text)
     await get().refreshDocuments()
-    const current = get().currentDocument
-    if (current && current.id === id) {
-      await get().selectDocument(id)
+    if (get().project === project && get().currentDocument?.id === id) {
+      const document = await loadDocument(id)
+      if (document && get().project === project && get().currentDocument?.id === id) set(document)
     }
     await get().refreshCodes()
     await get().refreshHistory()

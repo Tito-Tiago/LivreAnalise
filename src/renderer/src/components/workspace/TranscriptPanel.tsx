@@ -49,6 +49,12 @@ import { applyTextareaChange, textareaOffset, textareaValue } from '@/lib/textar
 import { captureFocus, hasKeyboardLayer, isTypingTarget, matchesCommand, restoreFocus, shortcutLabel, type FocusAnchor } from '@/lib/keyboard'
 import { useWorkspaceActions } from '@/lib/workspaceActions'
 
+interface ReaderSelection {
+  start: number
+  end: number
+  direction: 'forward' | 'backward' | 'none'
+}
+
 interface PendingSelection {
   start: number
   end: number
@@ -176,10 +182,13 @@ export function TranscriptPanel({ onNoteOpened }: {
   const handleFocus = useRef<{ id: number; side: 'start' | 'end'; element: HTMLElement } | null>(null)
   const textSaveInFlight = useRef<Promise<boolean> | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const editorOrigin = useRef<FocusAnchor | null>(null)
+  const returnFromEditor = useRef(false)
   const readerRef = useRef<HTMLTextAreaElement>(null)
   const readerTriggerRef = useRef<HTMLButtonElement>(null)
   const readerInitialized = useRef(false)
-  const readerSelectionRef = useRef({ start: 0, end: 0, direction: 'none' as 'forward' | 'backward' | 'none' })
+  const readerSelectionRef = useRef<ReaderSelection>({ start: 0, end: 0, direction: 'none' })
+  const readerRestore = useRef<{ field: HTMLTextAreaElement; selection: ReaderSelection } | null>(null)
   const keyboardPendingRef = useRef(false)
   const [keyboardReading, setKeyboardReading] = useState(false)
   const backdropRef = useRef<HTMLDivElement>(null)
@@ -201,6 +210,7 @@ export function TranscriptPanel({ onNoteOpened }: {
     end: number
     initial: Partial<CodeDialogValue>
   } | null>(null)
+  const barActionOrigin = useRef<FocusAnchor | null>(null)
   const [editingCode, setEditingCode] = useState<CodeWithCount | null>(null)
   const [memoTarget, setMemoTarget] = useState<MemoTarget | null>(null)
   const [bars, setBars] = useState<Bar[]>([])
@@ -383,7 +393,7 @@ export function TranscriptPanel({ onNoteOpened }: {
   const text = currentDocument?.plainText ?? ''
   // Textarea normaliza CRLF/CR para LF, mas as posições persistidas são UTF-16
   // no texto original. Não usar diretamente selectionStart como offset do banco.
-  const readerText = useMemo(() => text.replace(/\r\n?/g, '\n'), [text])
+  const readerText = useMemo(() => textareaValue(text), [text])
   const originalOffset = (offset: number): number => {
     if (readerText.length === text.length) return offset
     let original = 0
@@ -395,19 +405,33 @@ export function TranscriptPanel({ onNoteOpened }: {
     }
     return original
   }
-  const restoreReader = (collapse = false): void => {
-    if (!keyboardPendingRef.current) return
+  const restoreReader = (collapse = false): boolean => {
+    const field = readerRef.current
+    if (!keyboardPendingRef.current || !field) return false
     keyboardPendingRef.current = false
-    const originalReader = readerRef.current
     const selection = readerSelectionRef.current
-    requestAnimationFrame(() => {
-      const reader = readerRef.current
-      if (!reader || reader !== originalReader || hasKeyboardLayer()) return
-      const start = collapse ? selection.end : selection.start
-      reader.focus({ preventScroll: true })
-      reader.setSelectionRange(start, selection.end, collapse ? 'none' : selection.direction)
-    })
+    readerRestore.current = {
+      field,
+      selection: collapse ? { start: selection.end, end: selection.end, direction: 'none' } : selection
+    }
+    return true
   }
+
+  useLayoutEffect(() => {
+    if (pending || novoCodigo) return
+    const restoration = readerRestore.current
+    readerRestore.current = null
+    if (!restoration) return
+    // Espere o popover desmontar antes de devolver o foco ao textarea.
+    const frame = requestAnimationFrame(() => {
+      const { field, selection } = restoration
+      if (field !== readerRef.current || hasKeyboardLayer()) return
+      field.focus({ preventScroll: true })
+      field.setSelectionRange(selection.start, selection.end, selection.direction)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [pending, novoCodigo])
+
   const openReaderSelection = (field: HTMLTextAreaElement, x: number, y: number): void => {
     if (field.selectionStart === field.selectionEnd) return
     readerSelectionRef.current = { start: field.selectionStart, end: field.selectionEnd, direction: field.selectionDirection ?? 'none' }
@@ -422,6 +446,7 @@ export function TranscriptPanel({ onNoteOpened }: {
     setNovoCodigo(null)
     readerInitialized.current = false
     keyboardPendingRef.current = false
+    readerRestore.current = null
     readerSelectionRef.current = { start: 0, end: 0, direction: 'none' }
   }, [currentDocument?.id])
 
@@ -432,7 +457,7 @@ export function TranscriptPanel({ onNoteOpened }: {
     }
     if (!readerInitialized.current && scrollRef.current && textRef.current) {
       const { position } = captureTranscriptViewport(scrollRef.current, textRef.current)
-      const offset = readerText.length === text.length ? position : text.slice(0, position).replace(/\r\n?/g, '\n').length
+      const offset = textareaOffset(text, position)
       readerSelectionRef.current = { start: offset, end: offset, direction: 'none' }
       readerInitialized.current = true
     }
@@ -1009,6 +1034,15 @@ export function TranscriptPanel({ onNoteOpened }: {
   }, [editing])
 
   useLayoutEffect(() => {
+    if (editing || !returnFromEditor.current) return
+    returnFromEditor.current = false
+    if (document.activeElement === document.body && !hasKeyboardLayer()) {
+      restoreFocus(editorOrigin.current, readerTriggerRef.current)
+    }
+    editorOrigin.current = null
+  }, [editing])
+
+  useLayoutEffect(() => {
     if (!editing) return
     const viewport = historyViewportRef.current
     const backdrop = backdropRef.current
@@ -1087,9 +1121,8 @@ export function TranscriptPanel({ onNoteOpened }: {
     if (!pending) return
     await run(async () => {
       await addCoding(codeId, pending.start, pending.end)
+      if (!restoreReader(true)) window.getSelection()?.removeAllRanges()
       setPending(null)
-      window.getSelection()?.removeAllRanges()
-      restoreReader(true)
     })
   }
 
@@ -1112,8 +1145,7 @@ export function TranscriptPanel({ onNoteOpened }: {
         description: value.description || null
       })
       await addCoding(code.id, novoCodigo.start, novoCodigo.end)
-      window.getSelection()?.removeAllRanges()
-      restoreReader(true)
+      if (!restoreReader(true)) window.getSelection()?.removeAllRanges()
       return true
     } catch (err) {
       alert(mensagemDeErro(err, 'Não foi possível criar o código.'))
@@ -1179,13 +1211,15 @@ export function TranscriptPanel({ onNoteOpened }: {
     if (!pending || !podeReligar || !notaParaReligar) return
     await run(async () => {
       await updateNote({ id: notaParaReligar.id, startPos: pending.start, endPos: pending.end })
+      if (!restoreReader(true)) window.getSelection()?.removeAllRanges()
       setPending(null)
-      window.getSelection()?.removeAllRanges()
-      restoreReader(true)
     })
   }
 
   const startEditing = (): void => {
+    editorOrigin.current = document.activeElement === readerRef.current
+      ? captureFocus(readerTriggerRef.current) : captureFocus()
+    returnFromEditor.current = true
     if (scrollRef.current && textRef.current) {
       viewportRef.current = captureTranscriptViewport(scrollRef.current, textRef.current)
     }
@@ -1356,10 +1390,10 @@ export function TranscriptPanel({ onNoteOpened }: {
           </span>
           {editing ? (
             <>
-              <Button size="sm" variant="ghost" title="Sair da edição (Ctrl+E)" onClick={() => void cancelEditing()} disabled={saving}>
+              <Button size="sm" variant="ghost" title={`Sair da edição (${shortcutLabel('editText')})`} onClick={() => void cancelEditing()} disabled={saving}>
                 <X className="h-4 w-4" /> Cancelar
               </Button>
-              <Button size="sm" title="Salvar texto (Ctrl+S)" onClick={() => void saveEditing().catch(() => undefined)} disabled={saving}>
+              <Button size="sm" title={`Salvar texto (${shortcutLabel('saveText')})`} onClick={() => void saveEditing().catch(() => undefined)} disabled={saving}>
                 <Save className="h-4 w-4" /> Salvar texto
               </Button>
             </>
@@ -1531,7 +1565,7 @@ export function TranscriptPanel({ onNoteOpened }: {
             </div>
             <textarea
               ref={textareaRef}
-              data-focus-key="document-editor"
+              data-focus-key="document-edit"
               data-area-default
               value={textareaValue(draft)}
               readOnly={saving}
@@ -1954,6 +1988,9 @@ export function TranscriptPanel({ onNoteOpened }: {
                   key={bar.codingId}
                   onOpenChange={(open) => {
                     if (!open) return
+                    barActionOrigin.current = captureFocus(scrollRef.current?.querySelector(
+                      `[data-focus-key="coding-bar-${bar.codingId}"]`
+                    ))
                     setPending(null)
                     closeExcerptMenu()
                     setHoverCoding(null)
@@ -1980,6 +2017,7 @@ export function TranscriptPanel({ onNoteOpened }: {
                       <button
                         type="button"
                         className="flex h-full min-w-0 flex-1 items-center gap-1 text-left focus-visible:outline focus-visible:outline-2"
+                        data-focus-key={`coding-bar-${bar.codingId}`}
                         aria-label={`Selecionar citação: ${name}`}
                         onClick={(e) => {
                           e.stopPropagation()
@@ -2127,12 +2165,13 @@ export function TranscriptPanel({ onNoteOpened }: {
         />
       )}
 
-      {memoTarget && <MemoDialog target={memoTarget} onClose={() => setMemoTarget(null)} />}
+      {memoTarget && <MemoDialog target={memoTarget} onClose={() => setMemoTarget(null)} returnFocus={barActionOrigin.current} />}
       <CodeDialog
         open={editingCode !== null}
         existing={editingCode}
         onOpenChange={(open) => !open && setEditingCode(null)}
         title="Editar código"
+        returnFocus={barActionOrigin.current}
         onSubmit={async () => true}
       />
       <CodeDialog

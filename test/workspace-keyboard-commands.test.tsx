@@ -43,7 +43,7 @@ beforeEach(() => {
   })
   Object.defineProperty(window, 'api', {
     configurable: true, value: {
-      app: { onCloseRequested: () => () => {}, setTextDirty: vi.fn(), setMemoDirty: vi.fn() },
+      app: { onCloseRequested: () => () => {}, setTextDirty: vi.fn(), setMemoDirty: vi.fn(), setNameDirty: vi.fn() },
       view: { onAction: () => () => {}, setFont: vi.fn(), fontChanged: vi.fn() },
       codings: { listByCode },
       versions: { onChanged: () => () => {}, list: async () => [] }
@@ -236,4 +236,33 @@ it('a abertura rápida respeita o rascunho e Esc fecha apenas a confirmação', 
   await user.keyboard('{Escape}')
   await waitFor(() => expect(document.activeElement).toBe(editor))
   expect((editor as HTMLTextAreaElement).value).toContain('rascunho')
+})
+
+
+it('renomeia com F2 a partir da aba Códigos e devolve o foco ao documento', async () => {
+  const user = userEvent.setup()
+  const renameDocument = vi.fn(async () => {})
+  useAppStore.setState({ renameDocument })
+  render(<App />)
+
+  await user.click(screen.getByRole('button', { name: 'Códigos', exact: true }))
+  await user.keyboard('{F2}')
+  const editor = await screen.findByRole('textbox', { name: 'Nome do documento' })
+  expect(document.activeElement).toBe(editor)
+  await user.type(editor, 'Novo nome{Enter}', { skipClick: true })
+  await waitFor(() => expect(renameDocument).toHaveBeenCalledWith(doc.id, 'Novo nome', expect.any(String)))
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: doc.name })))
+})
+
+
+it('devolve o foco para Editar texto depois de confirmar o descarte', async () => {
+  const user = userEvent.setup()
+  render(<App />)
+  await user.click(screen.getByRole('button', { name: 'Editar texto' }))
+  const editor = screen.getByRole('textbox', { name: 'Texto de Entrevista' })
+  await user.type(editor, ' Rascunho')
+  await user.keyboard('{Control>}e{/Control}')
+  const dialog = await screen.findByRole('dialog', { name: 'Alterações não salvas no texto' })
+  await user.click(within(dialog).getByRole('button', { name: 'Descartar' }))
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Editar texto' })))
 })

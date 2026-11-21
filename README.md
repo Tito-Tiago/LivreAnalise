@@ -80,6 +80,8 @@ Também é possível codificar sem mouse:
    para filtrar, percorra as opções com `↑` e `↓` e confirme com `Enter`.
 4. `Esc` fecha o menu ou sai da navegação. `F6` e `Shift+F6` percorrem as áreas
    da janela; na barra lateral, as setas alternam entre Documentos e Códigos.
+5. Use `F2` para renomear o documento em foco ou o documento aberto. `Enter`
+   confirma o nome, `Esc` cancela.
 
 Na árvore de códigos, use as setas para percorrer, expandir e recolher itens.
 `Espaço` alterna a seleção, `Shift+↑/↓` seleciona um intervalo, `Enter` abre os

@@ -6,8 +6,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { flushPendingMemos } from '@/lib/memoAutosave'
 
 export function AppCloseDialog(): JSX.Element {
-  const podeSairDoTexto = useAppStore((s) => s.podeSairDoTexto)
-
   const closePending = useRef(false)
   const savingNotes = useRef(false)
   const [closeError, setCloseError] = useState<string | null>(null)
@@ -47,13 +45,16 @@ export function AppCloseDialog(): JSX.Element {
       return
     }
     closePending.current = true
-    if (!(await podeSairDoTexto())) {
+    const { sairDaRenomeacao, sairDoCodigo, podeSairDoTexto } = useAppStore.getState()
+    if ((sairDaRenomeacao && !(await sairDaRenomeacao())) ||
+        (sairDoCodigo && !(await sairDoCodigo())) ||
+        !(await podeSairDoTexto())) {
       closePending.current = false
       window.api.app.cancelClose()
       return
     }
     await flushAndClose()
-  }), [flushAndClose, podeSairDoTexto])
+  }), [flushAndClose])
 
   return (
     <Dialog open={closeError !== null} onOpenChange={(open) => {
